@@ -4,7 +4,8 @@ using System;
 public class ItemSpotsManager : MonoBehaviour
 {
     [Header (" Elements ")]
-    [SerializeField] private Transform itemSpot;
+    [SerializeField] private Transform itemSpotsParent;
+    private ItemSpot[] spots;
 
     [Header (" Settings ")]
     [SerializeField] private Vector3 itemLocalPositionOnSpot;
@@ -13,6 +14,7 @@ public class ItemSpotsManager : MonoBehaviour
     private void Awake()
     {
         InputManager.itemClicked += OnItemClicked;
+        StoreSpots();
     }
 
     private void OnDestroy()
@@ -36,14 +38,69 @@ public class ItemSpotsManager : MonoBehaviour
     }
 
     private void OnItemClicked(Item item){
-        Debug.Log("ItemSpotsManager detected a click on: " + item.name);
 
-        item.transform.SetParent(itemSpot);
+        if(!IsFreeSpotAvailable()){
+            Debug.Log("No free item spot available!");
+            return;
+        }
+
+        HandleItemClicked(item);
+            
+
+        
+        
+
+    }  
+
+    private void HandleItemClicked(Item item)
+    {
+        MoveItemToFirstFreeSpot(item);
+    } 
+
+    private void MoveItemToFirstFreeSpot(Item item)
+    {
+        ItemSpot targetSpot = GetFreeSpot();
+        targetSpot.Populate(item);
+
+
         item.transform.localPosition = itemLocalPositionOnSpot;
         item.transform.localScale = itemLocalScaleOnSpot;
+        item.transform.localRotation = Quaternion.identity;
         item.DisableShadows();
         item.DisablePhysics();
 
-        // Additional logic for when an item is clicked can be added here
-    }   
+    }
+
+    private ItemSpot GetFreeSpot()
+    {
+        for(int i = 0; i < spots.Length; i++)
+        {
+            if(spots[i].IsEmpty())
+                return spots[i];
+            
+        };
+
+        return null;
+        
+    }
+
+    private void StoreSpots()
+    {
+        spots = new ItemSpot[itemSpotsParent.childCount];
+
+        for(int i = 0; i < itemSpotsParent.childCount; i++)
+            spots[i] = itemSpotsParent.GetChild(i).GetComponent<ItemSpot>();
+    }
+
+    private bool IsFreeSpotAvailable()
+    {
+        for(int i = 0; i < spots.Length; i++)
+        {
+            if(spots[i].IsEmpty())
+                return true;
+        }
+        return false;
+        
+    }
 }
+
