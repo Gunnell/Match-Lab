@@ -49,9 +49,6 @@ public class InputManager : MonoBehaviour
             return;
         }
 
-
-        Debug.Log("We've clicked on: " + hit.collider.name);
-
         DeselectCurrentItem();
 
         currentItem = item;

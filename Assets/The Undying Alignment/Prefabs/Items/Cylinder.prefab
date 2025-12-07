@@ -73,6 +73,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1f76ea7c7c9c64ec58692736b23b6a2a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Item
+  itemName: 2
   renderer: {fileID: 7147295219988455828}
   collider: {fileID: 2430010650121880119}
 --- !u!1 &4065036387562629971

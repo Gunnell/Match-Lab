@@ -5,6 +5,7 @@ public class ItemSpot : MonoBehaviour
 
     [Header("Settings")]
     private Item item;
+    public Item Item => item;
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
@@ -21,10 +22,16 @@ public class ItemSpot : MonoBehaviour
     {
         this.item = item;
         item.transform.SetParent(transform);
+        item.AssignSpot(this);
 
         
     }
 
     public bool IsEmpty() => item == null;
+
+    public void Clear()
+    {
+        item = null;
+    }
 
 }
