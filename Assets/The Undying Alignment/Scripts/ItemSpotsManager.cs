@@ -111,7 +111,7 @@ public class ItemSpotsManager : MonoBehaviour
             return;
         }
 
-        MoveItemToSpot(item, idealSpot);
+        MoveItemToSpot(item, idealSpot, () => HandleItemReachedSpot(item));
     }
 
     private void HandleIdealSpotFull(Item item, ItemSpot idealSpot)
@@ -147,11 +147,11 @@ public class ItemSpotsManager : MonoBehaviour
             }
 
 
-            MoveItemToSpot(itemOnTheSpot, targetSpot, false);
+            MoveItemToSpot(itemOnTheSpot, targetSpot, () => HandleItemReachedSpot(itemOnTheSpot, false));
 
         }
 
-        MoveItemToSpot(itemToPlace, idealSpot);
+        MoveItemToSpot(itemToPlace, idealSpot, () => HandleItemReachedSpot(itemToPlace));
     }
         
 
@@ -200,7 +200,7 @@ public class ItemSpotsManager : MonoBehaviour
                 return;
             }
             spot.Clear();
-            MoveItemToSpot(itemOnTheSpot, targetSpot, false);
+            MoveItemToSpot(itemOnTheSpot, targetSpot, () => HandleItemReachedSpot(itemOnTheSpot, false));
         }
         HandleAllItemsMovedToTheLeft();
     }
@@ -213,7 +213,7 @@ public class ItemSpotsManager : MonoBehaviour
 
 
 
-    private void MoveItemToSpot(Item item, ItemSpot targetSpot, bool checkForMerge = true)
+    private void MoveItemToSpot(Item item, ItemSpot targetSpot, Action completeCallback)
     {
         targetSpot.Populate(item);
         
@@ -223,7 +223,8 @@ public class ItemSpotsManager : MonoBehaviour
         item.DisableShadows();
         item.DisablePhysics();
 
-        HandleItemReachedSpot(item, checkForMerge);
+        completeCallback?.Invoke();
+
     }
 
     private void MoveItemToFirstFreeSpot(Item item)
@@ -237,16 +238,11 @@ public class ItemSpotsManager : MonoBehaviour
         }
 
         CreateItemMergeData(item);
-        targetSpot.Populate(item);
+
+        MoveItemToSpot(item, targetSpot, () => HandleItemReachedSpot(item));
 
 
-        item.transform.localPosition = itemLocalPositionOnSpot;
-        item.transform.localScale = itemLocalScaleOnSpot;
-        item.transform.localRotation = Quaternion.identity;
-        item.DisableShadows();
-        item.DisablePhysics();
-
-        HandleFirstItemReachedSpot(item);
+        
 
     }
 
