@@ -177,10 +177,37 @@ public class ItemSpotsManager : MonoBehaviour
             items[i].Spot.Clear();
             Destroy(items[i].gameObject);
         }
-
-        isBusy = false; //TODO it will be deleted
+        MoveAllItemsToLeft();
             
 
+    }
+
+    private void MoveAllItemsToLeft()
+    {
+        for(int i = 3; i < spots.Length; i++)
+        {
+            ItemSpot spot = spots[i];
+
+            if (spot.IsEmpty())
+                continue;
+                
+            Item itemOnTheSpot = spot.Item; 
+            ItemSpot targetSpot = spots[i-3];
+            if (!targetSpot.IsEmpty())
+            {
+                Debug.LogWarning($"{targetSpot.name} is full");
+                isBusy = false;
+                return;
+            }
+            spot.Clear();
+            MoveItemToSpot(itemOnTheSpot, targetSpot, false);
+        }
+        HandleAllItemsMovedToTheLeft();
+    }
+
+    private void HandleAllItemsMovedToTheLeft()
+    {
+        isBusy = false;
     }
 
 
