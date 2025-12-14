@@ -8,19 +8,20 @@ public class ItemSpotsManager : MonoBehaviour
     [SerializeField] private Transform itemSpotsParent;
     private ItemSpot[] spots;
 
-    [Header (" Settings ")]
+    [Header(" Settings ")]
     [SerializeField] private Vector3 itemLocalPositionOnSpot;
     [SerializeField] private Vector3 itemLocalScaleOnSpot;
     private bool isBusy;
 
-    [Header (" Data ")]
+    [Header(" Data ")]
     private Dictionary<EItemName, ItemMergeData> itemMergeDataDictionary = new Dictionary<EItemName, ItemMergeData>();
     
-    [Header (" Animation ")]
+    [Header(" Animation Settings")]
     [SerializeField] private float animationDuration;
-
     [SerializeField] private LeanTweenType animationEasing;
 
+    [Header(" Actions ")]
+    public static Action<List<Item>> mergeStarted;
 
 
     private void Awake()
@@ -33,22 +34,7 @@ public class ItemSpotsManager : MonoBehaviour
     {
         InputManager.itemClicked -= OnItemClicked;
     }
-
-
-
-
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
-    {
-        
-    }
-
-    // Update is called once per frame
-    void Update()
-    {
-        
-    }
-
+    
     private void OnItemClicked(Item item){
 
         if (isBusy)
@@ -178,17 +164,14 @@ public class ItemSpotsManager : MonoBehaviour
         itemMergeDataDictionary.Remove(itemMergeData.itemName);
 
         for(int i = 0; i < items.Count; i++)
-        {
             items[i].Spot.Clear();
-            Destroy(items[i].gameObject);
-        }
         
         if(itemMergeDataDictionary.Count <= 0)
             isBusy = false;
         else
             MoveAllItemsToLeft(HandleAllItemsMovedToTheLeft);
             
-
+        mergeStarted?.Invoke(items);
     }
 
     private void MoveAllItemsToLeft(Action completeCallback)
