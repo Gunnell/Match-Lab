@@ -1,0 +1,60 @@
+using UnityEngine;
+using System.Collections.Generic;
+using NaughtyAttributes;
+using UnityEditor;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
+public class ItemPlacer : MonoBehaviour
+{
+    
+    [Header(" Elements ")]
+    [SerializeField] private List<ItemLevelData> itemData;
+    
+    [Header(" Settings")]
+    [SerializeField] private BoxCollider spawnZone;
+
+    [SerializeField] private int seed;
+#if UNITY_EDITOR
+    [Button]
+    private void GenerateItems()
+    {
+        while (transform.childCount > 0)
+        {
+            Transform child = transform.GetChild(0);
+            child.SetParent(null);
+            DestroyImmediate(child.gameObject);
+        }
+        
+        Random.InitState(seed);
+
+        for(int i = 0; i < itemData.Count; i++)
+        {
+            ItemLevelData data = itemData[i];
+            for(int j = 0; j < data.amount; j++)
+            {
+                Vector3 spawnPosition = GenerateSpawnPosition();
+                Item itemInstance = PrefabUtility.InstantiatePrefab(data.itemPrefab, transform) as Item;
+                itemInstance.transform.position = spawnPosition;
+                itemInstance.transform.rotation = Quaternion.Euler(Random.onUnitSphere * 360);
+                
+            }
+        }
+    }
+
+    private Vector3 GenerateSpawnPosition()
+    {
+        float x = Random.Range(-spawnZone.size.x / 2, spawnZone.size.x / 2);
+        float y = Random.Range(-spawnZone.size.y / 2, spawnZone.size.y / 2);
+        float z = Random.Range(-spawnZone.size.z / 2, spawnZone.size.z / 2);
+        
+        Vector3 localPosition = spawnZone.center + new Vector3(x, y, z);
+        Vector3 spawnPosition = transform.TransformPoint(localPosition);
+        
+        return spawnPosition;
+    }
+#endif
+
+
+}
