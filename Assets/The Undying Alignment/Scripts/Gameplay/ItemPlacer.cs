@@ -20,7 +20,7 @@ public class ItemPlacer : MonoBehaviour
     public ItemLevelData[] GetGoals()
     {
         List<ItemLevelData> goals = new List<ItemLevelData>();
-        foreach (ItemLevelData data in itemData)
+        foreach(ItemLevelData data in itemData)
             if(data.isGoal)
                 goals.Add(data);
         return goals.ToArray();

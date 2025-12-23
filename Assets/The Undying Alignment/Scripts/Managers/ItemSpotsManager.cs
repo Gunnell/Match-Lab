@@ -22,6 +22,7 @@ public class ItemSpotsManager : MonoBehaviour
 
     [Header(" Actions ")]
     public static Action<List<Item>> mergeStarted;
+    public static Action<Item> itemPickedUp;
 
 
     private void Awake()
@@ -49,6 +50,8 @@ public class ItemSpotsManager : MonoBehaviour
         }
 
         isBusy = true;
+        
+        itemPickedUp?.Invoke(item);
 
         HandleItemClicked(item);
             
@@ -243,10 +246,7 @@ public class ItemSpotsManager : MonoBehaviour
         CreateItemMergeData(item);
 
         MoveItemToSpot(item, targetSpot, () => HandleFirstItemReachedSpot(item));
-
-
         
-
     }
 
     private void CreateItemMergeData(Item item)
