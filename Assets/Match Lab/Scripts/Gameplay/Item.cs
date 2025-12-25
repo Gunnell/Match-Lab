@@ -9,8 +9,10 @@ public class Item : MonoBehaviour
     [SerializeField] private EItemName itemName;
     public EItemName ItemName => itemName;
     private ItemSpot spot;
-    public ItemSpot Spot => spot; 
+    public ItemSpot Spot => spot;
 
+    [SerializeField] private Sprite icon;
+    public Sprite Icon => icon;
     [Header(" Elements ")]
     [SerializeField] private Renderer renderer;
     [SerializeField] private Collider collider;
@@ -50,4 +52,5 @@ public class Item : MonoBehaviour
     {
         renderer.materials = new Material[] {baseMaterial};
     }
+    
 }
