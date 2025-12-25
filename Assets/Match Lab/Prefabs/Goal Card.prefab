@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 7487436140013866816}
   - component: {fileID: 251577066429449527}
   - component: {fileID: 7843177916934245078}
+  - component: {fileID: 8425552522094701301}
   m_Layer: 0
   m_Name: Goal Card
   m_TagString: Untagged
@@ -28,7 +29,7 @@ RectTransform:
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 1
+  m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 8550605222826603868}
   - {fileID: 127450740919934163}
@@ -37,9 +38,9 @@ RectTransform:
   - {fileID: 5711535125728812785}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
-  m_AnchoredPosition: {x: 0, y: 0}
+  m_AnchorMin: {x: 0.5, y: 0.5}
+  m_AnchorMax: {x: 0.5, y: 0.5}
+  m_AnchoredPosition: {x: -610, y: -1392}
   m_SizeDelta: {x: 145, y: 200}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &251577066429449527
@@ -76,6 +77,31 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::GoalCard
   amountText: {fileID: 857470094322931117}
   iconImage: {fileID: 631127515459363054}
+  backOfCard: {fileID: 4682422696230837743}
+  checkMark: {fileID: 7520098422310416354}
+  completeAnimator: {fileID: 8425552522094701301}
+--- !u!95 &8425552522094701301
+Animator:
+  serializedVersion: 7
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3156022119703847950}
+  m_Enabled: 1
+  m_Avatar: {fileID: 0}
+  m_Controller: {fileID: 9100000, guid: 82758d43a0c1c4963b4a7933a0d5e513, type: 2}
+  m_CullingMode: 0
+  m_UpdateMode: 0
+  m_ApplyRootMotion: 0
+  m_LinearVelocityBlending: 0
+  m_StabilizeFeet: 0
+  m_AnimatePhysics: 0
+  m_WarningMessage: 
+  m_HasTransformHierarchy: 1
+  m_AllowConstantClipSamplingOptimization: 1
+  m_KeepAnimatorStateOnDisable: 0
+  m_WriteDefaultValuesOnDisable: 0
 --- !u!1 &4054190774092750119
 GameObject:
   m_ObjectHideFlags: 0
