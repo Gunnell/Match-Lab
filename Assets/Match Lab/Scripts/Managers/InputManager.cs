@@ -16,6 +16,13 @@ public class InputManager : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        if(GameManager.instance.IsGame())
+            HandleControl();
+        
+    }
+
+    private void HandleControl()
+    {
         if(Input.GetMouseButton(0))
         {
             HandleDrag();
