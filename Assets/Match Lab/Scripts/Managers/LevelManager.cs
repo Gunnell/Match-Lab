@@ -21,11 +21,6 @@ public class LevelManager : MonoBehaviour, IGameStateListener
         LoadData();
     }
 
-    void Start()
-    {
-        
-    }
-
     private void SpawnLevel()
     {
         transform.Clear();

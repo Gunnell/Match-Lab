@@ -6,8 +6,9 @@ using System.Linq;
 public class GameManager : MonoBehaviour
 {
     
-    private EGameState gameState;
     public static GameManager instance;
+    private EGameState gameState;
+
 
     private void Awake()
     {
@@ -19,26 +20,26 @@ public class GameManager : MonoBehaviour
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
-    {
+    { 
         SetGameState(EGameState.MENU);
     }
-
+  
     // Update is called once per frame
     void Update()
     {
-        
+
     }
 
     public void SetGameState(EGameState gameState)
     {
         this.gameState = gameState;
 
-        IEnumerable<IGameStateListener> gameStateListeners
+       IEnumerable<IGameStateListener> gameStateListeners
             = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None)
                 .OfType<IGameStateListener>();
 
-        foreach (IGameStateListener dependency in gameStateListeners)
-            dependency.GameStateChangedCallback(gameState);
+        foreach(IGameStateListener dependency in gameStateListeners)
+            dependency.GameStateChangedCallback(gameState); 
         
     }
 
