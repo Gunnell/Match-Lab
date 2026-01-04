@@ -265,7 +265,7 @@ public class ItemSpotsManager : MonoBehaviour
     private void CheckForGameover()
     {
         if(GetFreeSpot() == null)
-            Debug.LogWarning("Gameover !!!!");
+            GameManager.instance.SetGameState(EGameState.GAMEOVER);
         else
             isBusy = false;
     }

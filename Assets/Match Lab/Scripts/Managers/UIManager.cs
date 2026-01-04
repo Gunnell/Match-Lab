@@ -11,10 +11,10 @@ public class UIManager : MonoBehaviour, IGameStateListener
 
     public void GameStateChangedCallback(EGameState gameState)
     {
-       /* menuPanel.SetActive(gameState == EGameState.MENU);
-        menuPanel.SetActive(gameState == EGameState.GAME);
-        menuPanel.SetActive(gameState == EGameState.LEVELCOMPLETE);
-        menuPanel.SetActive(gameState == EGameState.GAMEOVER); */
+        menuPanel.SetActive(gameState == EGameState.MENU);
+        gamePanel.SetActive(gameState == EGameState.GAME);
+        levelCompletedPanel.SetActive(gameState == EGameState.LEVELCOMPLETE);
+        gameOverPanel.SetActive(gameState == EGameState.GAMEOVER);
 
     }
 

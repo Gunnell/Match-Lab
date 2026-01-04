@@ -85,9 +85,7 @@ public class GoalManager : MonoBehaviour
         for(i = 0; i < goals.Length; i++)
             if (goals[i].amount > 0)
                 return;
-
-        Debug.Log("Level Complete");
-
+        GameManager.instance.SetGameState(EGameState.LEVELCOMPLETE);
 
     }
 }
