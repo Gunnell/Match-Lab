@@ -46,6 +46,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Level
   itemPlacer: {fileID: 7092563751921948953}
+  duration: 60
 --- !u!1 &7631907309322013098
 GameObject:
   m_ObjectHideFlags: 0
