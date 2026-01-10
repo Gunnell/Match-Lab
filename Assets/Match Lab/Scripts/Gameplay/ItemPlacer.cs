@@ -16,6 +16,11 @@ public class ItemPlacer : MonoBehaviour
     [SerializeField] private BoxCollider spawnZone;
 
     [SerializeField] private int seed;
+    
+    [Header(" Data ")]
+    private Item[] items;
+    
+    
 
     public ItemLevelData[] GetGoals()
     {
@@ -25,6 +30,14 @@ public class ItemPlacer : MonoBehaviour
                 goals.Add(data);
         return goals.ToArray();
     }
+
+    public Item[] GetItems()
+    {
+        if(items == null)
+            items = GetComponentsInChildren<Item>();
+        return items;
+    }
+
 #if UNITY_EDITOR
     [Button]
     private void GenerateItems()

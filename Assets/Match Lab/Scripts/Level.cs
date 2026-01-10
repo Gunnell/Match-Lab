@@ -6,8 +6,15 @@ public class Level : MonoBehaviour
     [SerializeField] private ItemPlacer itemPlacer;
     
     [Header(" Settings ")]
-    [SerializeField] private int duration;
+    [SerializeField]  private int duration;
     public int Duration => duration;
+
+    public Item[] GetItems()
+    {
+        return itemPlacer.GetItems();
+    }
+    
+    
 
     public ItemLevelData[] GetGoals()
         => itemPlacer.GetGoals();
