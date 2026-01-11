@@ -3,9 +3,12 @@ using System;
 public class InputManager : MonoBehaviour
 {
     public static Action<Item> itemClicked;
+    public static Action<Powerup> powerupClicked;
+
 
     [Header(" Settings ")]
     [SerializeField] private Material outlineMaterial;
+    [SerializeField] private LayerMask powerupLayer;
     private Item currentItem;
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -23,7 +26,11 @@ public class InputManager : MonoBehaviour
 
     private void HandleControl()
     {
-        if(Input.GetMouseButton(0))
+        if (Input.GetMouseButtonDown(0))
+        {
+            HandleMouseDown();
+        }
+        else if(Input.GetMouseButton(0))
         {
             HandleDrag();
         }
@@ -33,9 +40,19 @@ public class InputManager : MonoBehaviour
         }
     }
 
+    private void HandleMouseDown()
+    { 
+        Physics.Raycast(Camera.main.ScreenPointToRay(Input.mousePosition), out RaycastHit hit, 100, powerupLayer);
+
+        if (hit.collider == null)
+            return;
+
+        powerupClicked?.Invoke(hit.collider.GetComponent<Powerup>());
+
+    }
+
     private void HandleDrag()
     {
-        // Handle the mouse down event here
 
         Physics.Raycast(Camera.main.ScreenPointToRay(Input.mousePosition), out RaycastHit hit, 100);
 
