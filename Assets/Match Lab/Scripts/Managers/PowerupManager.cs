@@ -16,9 +16,14 @@ public class PowerUpManager : MonoBehaviour
     private bool isBusy;
     private int vacuumItemsToCollect;
     private int vacuumCounter;
+    
+    [Header(" Data ")]
+    [SerializeField] private int initialPUCount;
+    private int vacuumPUCount;
 
     private void Awake()
     {
+        LoadData();
         Vacuum.started += OnVacuumStarted;
         InputManager.powerupClicked += OnPowerupClicked;
     }
@@ -38,6 +43,7 @@ public class PowerUpManager : MonoBehaviour
         {
             case EPowerupType.Vacuum:
                 HandleVacuumClicked();
+                UpdateVacuumVisuals();
                 break;
         }
 
@@ -45,8 +51,19 @@ public class PowerUpManager : MonoBehaviour
 
     private void HandleVacuumClicked()
     {
-        if (isBusy) return;
-        vacuum.Play();
+        
+        if (vacuumPUCount <= 0)
+        {
+            vacuumPUCount = 3;
+            SaveData();
+        }
+        else
+        {
+           // isBusy = true;
+            vacuumPUCount--; 
+            SaveData();
+            vacuum.Play();
+        } 
     }
 
     private void OnVacuumStarted()
@@ -84,12 +101,14 @@ public class PowerUpManager : MonoBehaviour
          
          ItemLevelData goal = (ItemLevelData)greatestGoal;
          
-         isBusy = true;
+         isBusy = true; //g
          vacuumCounter = 0;
          
          List<Item> itemsToCollect = new List<Item>();
          for(int i = 0; i < items.Length; i++)
          {
+             if(items[i] == null)
+                 continue;
              if(items[i].ItemName == goal.itemPrefab.ItemName)
              {
                  itemsToCollect.Add(items[i]);
@@ -150,6 +169,20 @@ public class PowerUpManager : MonoBehaviour
             return null; 
         
         return goals[goalIdx]; 
+    }
+    private void UpdateVacuumVisuals()
+    {
+        vacuum.UpdateVisuals(vacuumPUCount);
+    }
+    private void LoadData()
+    {
+        vacuumPUCount = PlayerPrefs.GetInt("VacuumPUCount", initialPUCount);
+        UpdateVacuumVisuals();
+    }
+    
+    private void SaveData()
+    {
+        PlayerPrefs.SetInt("VacuumPUCount", vacuumPUCount);
     }
 
 }

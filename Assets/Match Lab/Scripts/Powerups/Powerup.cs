@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 
 public enum EPowerupType
@@ -13,5 +14,20 @@ public abstract class Powerup : MonoBehaviour
     [Header(" Settings ")]
     [SerializeField] private EPowerupType type;
     public EPowerupType Type => type;
-    
+
+    [Header(" Elements")] 
+    [SerializeField] private TextMeshPro amountText;
+    [SerializeField] private GameObject videoIcon;
+
+
+    public void UpdateVisuals(int amount)
+    {
+        videoIcon.SetActive(amount <= 0);
+        amountText.gameObject.SetActive(amount > 0);
+        
+        amountText.text = amount.ToString();
+    }
+
+
+
 }
