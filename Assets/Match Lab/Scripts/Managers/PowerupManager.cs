@@ -126,12 +126,29 @@ public class PowerUpManager : MonoBehaviour
              itemsToCollect[i].DisablePhysics();
              
              Item itemToCollect = itemsToCollect[i];
+             List<Vector3> points = new List<Vector3>();
              
-             LeanTween.move(itemsToCollect[i].gameObject, vacuumEndPosition.position, .5f)
-                 .setEase(LeanTweenType.easeInCubic)
+             points.Add(itemsToCollect[i].transform.position);
+             points.Add(itemsToCollect[i].transform.position);
+             
+             points.Add(itemsToCollect[i].transform.position + Vector3.up * 2);
+             points.Add(vacuumEndPosition.position + Vector3.up * 2);
+             
+             points.Add(vacuumEndPosition.position);
+             points.Add(vacuumEndPosition.position);
+
+
+
+
+             LeanTween.moveSpline(itemsToCollect[i].gameObject, points.ToArray(), .8f)
                  .setOnComplete(() => ItemReachedVacuum(itemToCollect));
              
-             LeanTween.scale(itemsToCollect[i].gameObject, Vector3.zero, .5f);
+             
+            /* LeanTween.move(itemsToCollect[i].gameObject, vacuumEndPosition.position, .5f)
+                 .setEase(LeanTweenType.easeInCubic)
+                 .setOnComplete(() => ItemReachedVacuum(itemToCollect)); */
+             
+             LeanTween.scale(itemsToCollect[i].gameObject, Vector3.zero, .8f);
          }
 
          for (int i = itemsToCollect.Count-1; i >= 0; i--)
