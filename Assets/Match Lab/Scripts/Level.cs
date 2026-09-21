@@ -1,9 +1,10 @@
 using UnityEngine;
 
-public class Level : MonoBehaviour
+public class  Level : MonoBehaviour
 {
     [Header(" Elements ")]
     [SerializeField] private ItemPlacer itemPlacer;
+    public Transform ItemParent => itemPlacer.transform;
     
     [Header(" Settings ")]
     [SerializeField]  private int duration;

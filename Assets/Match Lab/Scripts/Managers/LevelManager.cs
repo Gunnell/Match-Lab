@@ -10,8 +10,12 @@ public class  LevelManager : MonoBehaviour, IGameStateListener
     private int levelIndex;
     public Item[] Items => currentLevel.GetItems();
     
+    public Transform ItemParent => currentLevel.ItemParent;
+
+    
     [Header(" Settings ")]
     private Level currentLevel;
+
     
     [Header(" Action ")]
     public static Action<Level> levelSpawned;

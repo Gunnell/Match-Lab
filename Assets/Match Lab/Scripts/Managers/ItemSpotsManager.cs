@@ -1,9 +1,12 @@
 using UnityEngine;
 using System;
 using System.Collections.Generic;
+using Random = UnityEngine.Random;
 
 public class ItemSpotsManager : MonoBehaviour
 {
+    public static ItemSpotsManager instance;
+     
     [Header (" Elements ")]
     [SerializeField] private Transform itemSpotsParent;
     private ItemSpot[] spots;
@@ -27,13 +30,20 @@ public class ItemSpotsManager : MonoBehaviour
 
     private void Awake()
     {
+        if (instance == null)
+            instance = this;
+        else
+            Destroy(gameObject);
+        
         InputManager.itemClicked += OnItemClicked;
+        MergeManager.mergeCompleted += OnMergeCompleted;
         StoreSpots();
     }
 
     private void OnDestroy()
     {
         InputManager.itemClicked -= OnItemClicked;
+        MergeManager.mergeCompleted -= OnMergeCompleted;
     }
     
     private void OnItemClicked(Item item){
@@ -168,42 +178,63 @@ public class ItemSpotsManager : MonoBehaviour
 
         for(int i = 0; i < items.Count; i++)
             items[i].Spot.Clear();
-        
-        if(itemMergeDataDictionary.Count <= 0)
-            isBusy = false;
-        else
-            MoveAllItemsToLeft(HandleAllItemsMovedToTheLeft);
-            
+
+        // The spots are free immediately, but the merged items are still
+        // animating. Wait for MergeManager to finish before compacting,
+        // otherwise the survivors slide left through the merge animation.
         mergeStarted?.Invoke(items);
     }
 
     private void MoveAllItemsToLeft(Action completeCallback)
     {
-        bool callBackTriggered = false;
-        for(int i = 3; i < spots.Length; i++)
+        List<Item> itemsToMove = new List<Item>();
+        List<ItemSpot> targetSpots = new List<ItemSpot>();
+
+        int targetIndex = 0;
+
+        for(int i = 0; i < spots.Length; i++)
         {
             ItemSpot spot = spots[i];
+
             if (spot.IsEmpty())
                 continue;
-                
-            Item itemOnTheSpot = spot.Item; 
-            ItemSpot targetSpot = spots[i-3];
-            if (!targetSpot.IsEmpty())
+
+            if (i != targetIndex)
             {
-                Debug.LogWarning($"{targetSpot.name} is full");
-                isBusy = false;
-                return;
+                itemsToMove.Add(spot.Item);
+                targetSpots.Add(spots[targetIndex]);
+                spot.Clear();
             }
-            spot.Clear();
-            completeCallback += () => HandleItemReachedSpot(itemOnTheSpot, false);
-            MoveItemToSpot(itemOnTheSpot, targetSpot, completeCallback);
-            
-            callBackTriggered = true;
+
+            targetIndex++;
+        }
+
+        if(itemsToMove.Count <= 0)
+        {
+            completeCallback?.Invoke();
+            return;
+        }
+
+        for(int i = 0; i < itemsToMove.Count; i++)
+        {
+            Item itemToMove = itemsToMove[i];
+
+            Action callback = () => HandleItemReachedSpot(itemToMove, false);
+
+            if (i == itemsToMove.Count - 1)
+                callback += completeCallback;
+
+            MoveItemToSpot(itemToMove, targetSpots[i], callback);
         }
         
-        if(!callBackTriggered)
-            completeCallback?.Invoke();
-        
+    }
+
+    private void OnMergeCompleted()
+    {
+        if (itemMergeDataDictionary.Count <= 0)
+            isBusy = false;
+        else
+            MoveAllItemsToLeft(HandleAllItemsMovedToTheLeft);
     }
 
     private void HandleAllItemsMovedToTheLeft()
@@ -300,6 +331,67 @@ public class ItemSpotsManager : MonoBehaviour
         }
         return false;
         
+    }
+
+    public Item ReleaseRandomItem(Action completeCallback)
+    {
+        if (isBusy)
+        {
+            Debug.LogWarning("ItemSpotsManager is busy!");
+            return null;
+        }
+
+        ItemSpot spot = GetRandomOccupiedSpot();
+
+        if (spot == null)
+            return null;
+
+        isBusy = true;
+
+        Item item = spot.Item;
+
+        RemoveItemFromMergeData(item);
+
+        spot.Clear();
+        item.UnassignSpot();
+
+        MoveAllItemsToLeft(() =>
+        {
+            isBusy = false;
+            completeCallback?.Invoke();
+        });
+
+        return item;
+    }
+
+    private void RemoveItemFromMergeData(Item item)
+    {
+        if (!itemMergeDataDictionary.ContainsKey(item.ItemName))
+            return;
+
+        List<Item> items = itemMergeDataDictionary[item.ItemName].items;
+        items.Remove(item);
+
+        if (items.Count <= 0)
+            itemMergeDataDictionary.Remove(item.ItemName);
+    }
+
+    public ItemSpot GetRandomOccupiedSpot()
+    {
+        List<ItemSpot> occupiedSpots = new List<ItemSpot>();
+        for (int i = 0; i < spots.Length; i++)
+        {
+            if (!spots[i].IsEmpty())
+            {
+                occupiedSpots.Add(spots[i]); 
+            }
+        }
+
+        if (occupiedSpots.Count <= 0)
+            return null;
+        
+        return occupiedSpots[Random.Range(0, occupiedSpots.Count)];
+
     }
 }
 

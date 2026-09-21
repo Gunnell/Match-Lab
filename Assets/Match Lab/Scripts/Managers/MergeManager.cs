@@ -15,6 +15,9 @@ public class MergeManager : MonoBehaviour
     
     [Header(" Effects ")]
     [SerializeField] private ParticleSystem mergeParticles;
+
+    [Header(" Actions ")]
+    public static Action mergeCompleted;
     
     private void Awake()
     {
@@ -61,6 +64,8 @@ public class MergeManager : MonoBehaviour
 
         ParticleSystem particles = Instantiate(mergeParticles, items[1].transform.position, Quaternion.identity, transform);
         particles.Play();
+
+        mergeCompleted?.Invoke();
 
     }
 

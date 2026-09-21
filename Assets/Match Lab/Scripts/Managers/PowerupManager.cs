@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using NaughtyAttributes;
-using NUnit.Framework;
 using UnityEngine;
 
 public class PowerUpManager : MonoBehaviour
@@ -83,7 +82,7 @@ public class PowerUpManager : MonoBehaviour
     {
         
     }
-
+    #region Vacuum Powerup
     [Button]
     private void VacuumPowerup()
     {
@@ -101,13 +100,12 @@ public class PowerUpManager : MonoBehaviour
          
          ItemLevelData goal = (ItemLevelData)greatestGoal;
          
-         isBusy = true; //g
-         vacuumCounter = 0;
-         
          List<Item> itemsToCollect = new List<Item>();
          for(int i = 0; i < items.Length; i++)
          {
              if(items[i] == null)
+                 continue;
+             if(items[i].Spot != null)
                  continue;
              if(items[i].ItemName == goal.itemPrefab.ItemName)
              {
@@ -118,6 +116,11 @@ public class PowerUpManager : MonoBehaviour
              }
          }
          
+         if(itemsToCollect.Count <= 0)
+             return;
+         
+         isBusy = true; //g
+         vacuumCounter = 0;
          vacuumItemsToCollect = itemsToCollect.Count;
 
 
@@ -175,7 +178,10 @@ public class PowerUpManager : MonoBehaviour
 
         for (int i = 0; i < goals.Length; i++)
         {
-            if (goals[i].amount >= max)
+            if (goals[i].amount <= 0)
+                continue;
+
+            if (goals[i].amount > max)
             {
                 max = goals[i].amount;
                 goalIdx = i;
@@ -191,6 +197,35 @@ public class PowerUpManager : MonoBehaviour
     {
         vacuum.UpdateVisuals(vacuumPUCount);
     }
+    #endregion
+    
+    #region Spring Powerup
+
+    [Button]
+    public void SpringPowerup()
+    {
+        if (isBusy) return;
+
+        isBusy = true;
+
+        Item itemToRelease = ItemSpotsManager.instance.ReleaseRandomItem(() => isBusy = false);
+
+        if (itemToRelease == null)
+        {
+            isBusy = false;
+            return;
+        }
+
+        itemToRelease.transform.parent = LevelManager.instance.ItemParent;
+        itemToRelease.RestoreScale();
+        
+        itemToRelease.EnablePhysics();
+        itemToRelease.EnableShadows();
+
+    }
+
+    #endregion
+    
     private void LoadData()
     {
         vacuumPUCount = PlayerPrefs.GetInt("VacuumPUCount", initialPUCount);
