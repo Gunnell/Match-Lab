@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 2596697246058824259}
   - component: {fileID: 2233082922261598767}
   - component: {fileID: 8183042630950507969}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Gold Pile
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -89,7 +89,7 @@ GameObject:
   - component: {fileID: 4120280994968536818}
   - component: {fileID: 4518870900601723982}
   - component: {fileID: 2156664861384977907}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Renderer
   m_TagString: Untagged
   m_Icon: {fileID: 0}

@@ -5,15 +5,18 @@ public class InputManager : MonoBehaviour
     public static Action<Item> itemClicked;
     public static Action<Powerup> powerupClicked;
 
+    // Set while a powerup needs the board to itself (e.g. the Fan shuffle).
+    public static bool IsLocked;
+
 
     [Header(" Settings ")]
     [SerializeField] private Material outlineMaterial;
     [SerializeField] private LayerMask powerupLayer;
     private Item currentItem;
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
+    private void Awake()
     {
-        
+        // Static, so it would survive a scene reload mid-lock.
+        IsLocked = false;
     }
 
     // Update is called once per frame
@@ -26,6 +29,12 @@ public class InputManager : MonoBehaviour
 
     private void HandleControl()
     {
+        if (IsLocked)
+        {
+            DeselectCurrentItem();
+            return;
+        }
+
         if (Input.GetMouseButtonDown(0))
         {
             HandleMouseDown();
@@ -74,7 +83,8 @@ public class InputManager : MonoBehaviour
             return;
         }
 
-        if(!hit.collider.transform.parent.TryGetComponent(out Item item))
+        // Mid-air Spring throws can't be picked until they land in the board.
+        if(!hit.collider.transform.parent.TryGetComponent(out Item item) || item.IsBeingThrown)
         {
             DeselectCurrentItem();
             return;
