@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 1273342772494337023}
   - component: {fileID: 5872208304339457654}
   - component: {fileID: 7255429038880479447}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Lab Tube
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -89,7 +89,7 @@ GameObject:
   - component: {fileID: 3346025208879128862}
   - component: {fileID: 7147295219988455828}
   - component: {fileID: 1017723357285459667}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Renderer
   m_TagString: Untagged
   m_Icon: {fileID: 0}

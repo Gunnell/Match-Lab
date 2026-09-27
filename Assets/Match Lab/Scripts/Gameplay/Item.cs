@@ -23,6 +23,11 @@ public class Item : MonoBehaviour
     public Vector3 BoardPosition => boardPosition;
     private Quaternion boardRotation;
     public Quaternion BoardRotation => boardRotation;
+
+    // Spring throw: the item flies in over the board's front wall, which it
+    // ignores until it is inside the board (or a fallback timer ends it).
+    private Collider ignoredThrowCollider;
+    public bool IsBeingThrown { get; private set; }
     // [SerializeField] private Collider collider;
 
     private void Awake()
@@ -67,6 +72,8 @@ public class Item : MonoBehaviour
         // collider.enabled = false;
         GetComponent<Rigidbody>().isKinematic = true;
         collider.enabled = false;
+        // A vacuumed or re-picked item must not keep a stale ignore.
+        EndThrow();
     }
     
     public bool IsPhysicsEnabled => !GetComponent<Rigidbody>().isKinematic;
@@ -77,6 +84,41 @@ public class Item : MonoBehaviour
         collider.enabled = true;
     }
     
+    public void Hide()
+        => renderer.enabled = false;
+
+    public void Show()
+        => renderer.enabled = true;
+
+    public void BeginThrow(Collider throwCollider)
+    {
+        IsBeingThrown = true;
+
+        if (throwCollider == null)
+            return;
+
+        Physics.IgnoreCollision(collider, throwCollider, true);
+        ignoredThrowCollider = throwCollider;
+    }
+
+    public void EndThrow()
+    {
+        if (!IsBeingThrown)
+            return;
+
+        if (ignoredThrowCollider != null)
+            Physics.IgnoreCollision(collider, ignoredThrowCollider, false);
+
+        ignoredThrowCollider = null;
+        IsBeingThrown = false;
+    }
+
+    private void OnTriggerEnter(Collider other)
+    {
+        if (IsBeingThrown && other.GetComponent<BoardEnterZone>() != null)
+            EndThrow();
+    }
+
     public void Select(Material outlineMaterial)
     {
         renderer.materials = new Material[2] {baseMaterial, outlineMaterial};

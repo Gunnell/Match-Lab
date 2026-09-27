@@ -11,9 +11,60 @@ public class PowerUpManager : MonoBehaviour
 
     [Header(" Spring Elements ")]
     [SerializeField] private Spring spring;
-    // A little slower than the rack add animation so the return reads clearly.
-    [SerializeField] private float springReturnDuration = .3f;
-    [SerializeField] private LeanTweenType springReturnEasing = LeanTweenType.easeInOutCubic;
+    // The released item vanishes from the rack, then is launched from the
+    // Spring button onto the board with physics.
+    [Tooltip("Divides the launch delay only.")]
+    [SerializeField] private float springSpeedMultiplier = 1f;
+    [Tooltip("Where the item appears and is launched from. Falls back to the Spring button.")]
+    [SerializeField] private Transform springLaunchPoint;
+    [Tooltip("Aim point for the throw. Falls back to straight ahead (+z).")]
+    [SerializeField] private Transform springBoardCenter;
+    [Tooltip("Board wall between the button and the board; the thrown item passes through it until it is inside the board.")]
+    [SerializeField] private Collider springThrowCollider;
+    [SerializeField] private float springLaunchDelay = .265f;
+    [Tooltip("Rack size to full size after launch. Not affected by the speed multiplier.")]
+    [SerializeField] private float springScaleDuration = .65f;
+    [SerializeField] private float springSideRandom = .3f;
+    [SerializeField] private float springSideMultiplier = 2f;
+    [Tooltip("Launch this far to either side of the board centre and the throw is nudged back toward the middle.")]
+    [SerializeField] private float springEdgeDistance = 1f;
+    [SerializeField] private float springEdgeBonus = .12f;
+    [SerializeField] private float springSideForce = 275f;
+    [SerializeField] private float springUpForce = 525f;
+    [SerializeField] private float springUpMultiplier = 1.05f;
+    [SerializeField] private float springForwardForce = 275f;
+    [SerializeField] private float springForwardMultiplier = 2.15f;
+    [SerializeField] private Vector2 springTorqueRange = new Vector2(40, 120);
+    [Tooltip("Scales the original forces to this world, like fanForceScale. The Fan's .28 is too weak here: "
+        + "the button sits behind the board's front wall, and at .28 the item lands inside that wall. "
+        + ".75 carries it well into the board (lands between the front third and the middle, depending on the pile).")]
+    [SerializeField] private float springForceScale = .75f;
+    [Tooltip("Extra downward pull after launch so the item lands quickly.")]
+    [SerializeField] private float springExtraFall = 1500f;
+    [SerializeField] private float springFallMultiplier = 1f;
+    [SerializeField] private float springFallDuration = 1.5f;
+    [Tooltip("Added to linear damping every frame for springDampingDuration, so the item settles instead of skidding.")]
+    [SerializeField] private float springDampingPerFrame = .045f;
+    [SerializeField] private float springDampingDuration = 1f;
+    [Tooltip("Stop ignoring the throw collider after this long even if the item never entered the board.")]
+    [SerializeField] private float springBoardEnterFallback = 1.5f;
+
+    [Header(" Fan Elements ")]
+    [SerializeField] private Fan fan;
+    // Timeline and forces follow Match Factory's Shuffle booster.
+    [Tooltip("Divides every step except the end time (ShuffleBoosterSpeedMultiplier).")]
+    [SerializeField] private float fanSpeedMultiplier = 1f;
+    [SerializeField] private float fanWindStartTime = .33f;
+    [SerializeField] private float fanThrowTime = .4f;
+    [SerializeField] private float fanWindStopTime = .91f;
+    [Tooltip("Item collisions and taps come back. Not affected by the speed multiplier.")]
+    [SerializeField] private float fanEndTime = 1.2f;
+    [SerializeField] private Vector2 fanThrowUpForce = new Vector2(650, 750);
+    [SerializeField] private float fanThrowSideForce = 300;
+    [SerializeField] private Vector2 fanThrowTorque = new Vector2(20, 50);
+    [Tooltip("Scales the original forces to this world. At 1 an item (mass 1) is thrown ~10 m up, "
+        + "past the camera; .28 lands it inside the 0.8s window before collisions return.")]
+    [SerializeField] private float fanForceScale = .28f;
     [Header(" Actions ")] 
     public static Action<Item> itemPickedUp;
     public static Action<Item> itemBackToGame;
@@ -22,6 +73,7 @@ public class PowerUpManager : MonoBehaviour
     // Each powerup has its own busy flag so using one never blocks the other.
     private bool isVacuumBusy;
     private bool isSpringBusy;
+    private bool isFanBusy;
     // Spring tapped while the rack was animating; fired once the rack is free.
     private bool springQueued;
     private int vacuumItemsToCollect;
@@ -34,11 +86,14 @@ public class PowerUpManager : MonoBehaviour
     [SerializeField] private int initialPUCount;
     private int vacuumPUCount;
     private int springPUCount;
+    private int fanPUCount;
 
     private void Awake()
     {
         Vacuum.started += OnVacuumStarted;
         InputManager.powerupClicked += OnPowerupClicked;
+        // Collision matrix changes are global and outlive the scene.
+        SetItemCollisions(true);
         LoadData();
     }
 
@@ -46,7 +101,7 @@ public class PowerUpManager : MonoBehaviour
     {
         Vacuum.started -= OnVacuumStarted;
         InputManager.powerupClicked -= OnPowerupClicked;
-
+        SetItemCollisions(true);
     }
 
     private void OnPowerupClicked(Powerup powerup)
@@ -63,6 +118,11 @@ public class PowerUpManager : MonoBehaviour
             case EPowerupType.Spring:
                 HandleSpringClicked();
                 UpdateSpringVisuals();
+                break;
+
+            case EPowerupType.Fan:
+                HandleFanClicked();
+                UpdateFanVisuals();
                 break;
         }
 
@@ -114,6 +174,7 @@ public class PowerUpManager : MonoBehaviour
         if (springQueued)
             TryFireQueuedSpring();
     }
+
     #region Vacuum Powerup
     [Button]
     private void VacuumPowerup()
@@ -282,6 +343,10 @@ public class PowerUpManager : MonoBehaviour
         if (ItemSpotsManager.instance.IsBusy)
             return;
 
+        // The Fan owns the input lock; wait for it to finish.
+        if (isFanBusy)
+            return;
+
         springQueued = false;
         FireSpring();
         UpdateSpringVisuals();
@@ -300,14 +365,16 @@ public class PowerUpManager : MonoBehaviour
     [Button]
     public bool SpringPowerup()
     {
-        if (isSpringBusy) return false;
+        if (isSpringBusy || isFanBusy) return false;
 
         isSpringBusy = true;
+        InputManager.IsLocked = true;
 
         Item itemToRelease = ItemSpotsManager.instance.ReleaseLastItemOnRack();
 
         if (itemToRelease == null)
         {
+            InputManager.IsLocked = false;
             isSpringBusy = false;
             return false;
         }
@@ -315,30 +382,155 @@ public class PowerUpManager : MonoBehaviour
         // Not itemPickedUp: the goal count goes back up instead.
         itemBackToGame?.Invoke(itemToRelease);
 
-        ReturnItemToBoard(itemToRelease);
+        StartCoroutine(SpringThrowSequence(itemToRelease));
 
         return true;
     }
 
-    // Plays the rack's add animation in reverse: the item retraces its path
-    // back to where it was picked, then physics takes over again.
-    private void ReturnItemToBoard(Item item)
+    private System.Collections.IEnumerator SpringThrowSequence(Item item)
     {
-        item.transform.parent = LevelManager.instance.ItemParent;
+        // Vanish from the rack at once; the rack is already compacting.
         LeanTween.cancel(item.gameObject);
+        item.transform.parent = LevelManager.instance.ItemParent;
+        item.Hide();
+        item.DisableShadows();
 
-        LeanTween.move(item.gameObject, item.BoardPosition, springReturnDuration)
-            .setEase(springReturnEasing);
-        LeanTween.rotate(item.gameObject, item.BoardRotation.eulerAngles, springReturnDuration)
-            .setEase(springReturnEasing);
-        LeanTween.scale(item.gameObject, item.BaseScale, springReturnDuration)
-            .setEase(springReturnEasing)
-            .setOnComplete(() =>
-            {
-                item.EnablePhysics();
-                item.EnableShadows();
-                isSpringBusy = false;
-            });
+        // TODO: Spring button animation / particle hook (Spring.cs has none yet).
+
+        yield return new WaitForSeconds(springLaunchDelay / springSpeedMultiplier);
+
+        if (item == null)
+        {
+            InputManager.IsLocked = false;
+            isSpringBusy = false;
+            yield break;
+        }
+
+        Transform launchPoint = springLaunchPoint != null ? springLaunchPoint : spring != null ? spring.transform : null;
+        if (launchPoint != null)
+            item.transform.position = launchPoint.position;
+
+        item.Show();
+        item.EnablePhysics();
+        item.EnableShadows();
+
+        Rigidbody rb = item.GetComponent<Rigidbody>();
+        rb.linearVelocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+
+        LeanTween.scale(item.gameObject, item.BaseScale, springScaleDuration)
+            .setEase(LeanTweenType.easeOutQuad);
+
+        item.BeginThrow(springThrowCollider);
+        LaunchSpringItem(rb);
+
+        StartCoroutine(SpringExtraFall(item, rb));
+        StartCoroutine(SpringDamping(item, rb));
+        StartCoroutine(SpringBoardEnterFallback(item));
+
+        // Free at launch, not at landing, so the next Spring can go right away.
+        InputManager.IsLocked = false;
+        isSpringBusy = false;
+    }
+
+    // Mostly up and into the board, with a little random sideways drift that
+    // is pushed back toward the middle near the board's side edges.
+    private void LaunchSpringItem(Rigidbody rb)
+    {
+        Vector3 launchPos = rb.position;
+        Vector3 forward = Vector3.forward;
+
+        if (springBoardCenter != null)
+        {
+            Vector3 toCenter = springBoardCenter.position - launchPos;
+            toCenter.y = 0;
+            if (toCenter.sqrMagnitude > .0001f)
+                forward = toCenter.normalized;
+        }
+
+        Vector3 right = Vector3.Cross(Vector3.up, forward);
+        Vector3 center = springBoardCenter != null ? springBoardCenter.position : launchPos;
+        float lateral = Vector3.Dot(launchPos - center, right);
+
+        float side = UnityEngine.Random.Range(0f, springSideRandom) * springSideMultiplier;
+        int dir;
+
+        if (lateral > springEdgeDistance)
+        {
+            dir = -1;
+            side += springEdgeBonus;
+        }
+        else if (lateral < -springEdgeDistance)
+        {
+            dir = 1;
+            side += springEdgeBonus;
+        }
+        else
+            dir = UnityEngine.Random.value < .5f ? -1 : 1;
+
+        Vector3 force = right * (dir * side * springSideForce)
+            + Vector3.up * (springUpMultiplier * springUpForce)
+            + forward * ((side * .25f + 1f) * springForwardForce * springForwardMultiplier);
+
+        Vector3 torque = new Vector3(RandomSpringTorque(), RandomSpringTorque(), RandomSpringTorque());
+
+        // ForceMode.Force applied once, as with the Fan.
+        rb.AddForce(force * springForceScale, ForceMode.Force);
+        rb.AddTorque(torque * springForceScale, ForceMode.Force);
+    }
+
+    private float RandomSpringTorque()
+    {
+        float value = UnityEngine.Random.Range((int)springTorqueRange.x, (int)springTorqueRange.y);
+        return UnityEngine.Random.value < .5f ? -value : value;
+    }
+
+    // Still a free item on the board (not destroyed, vacuumed or re-picked).
+    private static bool IsFreeOnBoard(Item item)
+        => item != null && item.gameObject.activeInHierarchy && item.Spot == null && item.IsPhysicsEnabled;
+
+    private System.Collections.IEnumerator SpringExtraFall(Item item, Rigidbody rb)
+    {
+        float timer = 0;
+
+        while (timer < springFallDuration)
+        {
+            yield return new WaitForFixedUpdate();
+
+            if (!IsFreeOnBoard(item))
+                yield break;
+
+            rb.AddForce(Vector3.down * (springExtraFall * Time.fixedDeltaTime * springFallMultiplier * springForceScale), ForceMode.Force);
+            timer += Time.fixedDeltaTime;
+        }
+    }
+
+    private System.Collections.IEnumerator SpringDamping(Item item, Rigidbody rb)
+    {
+        float originalDamping = rb.linearDamping;
+        float timer = 0;
+
+        while (timer < springDampingDuration)
+        {
+            yield return null;
+
+            if (!IsFreeOnBoard(item))
+                break;
+
+            rb.linearDamping += springDampingPerFrame;
+            timer += Time.deltaTime;
+        }
+
+        if (rb != null)
+            rb.linearDamping = originalDamping;
+    }
+
+    private System.Collections.IEnumerator SpringBoardEnterFallback(Item item)
+    {
+        yield return new WaitForSeconds(springBoardEnterFallback);
+
+        if (item != null)
+            item.EndThrow();
     }
 
     private void UpdateSpringVisuals()
@@ -350,19 +542,154 @@ public class PowerUpManager : MonoBehaviour
     }
 
     #endregion
+
+    #region Fan Powerup
+
+    private void HandleFanClicked()
+    {
+        if (isFanBusy)
+            return;
+
+        if (fanPUCount <= 0)
+        {
+            // TODO: rewarded video. Same free refill placeholder as the others.
+            fanPUCount = 3;
+            SaveData();
+            return;
+        }
+
+        if (!FanPowerup())
+            return;
+
+        fanPUCount--;
+        SaveData();
+    }
+
+    // Shuffle: every item on the board gets one random launch and physics
+    // does the rest. Items ignore each other while airborne, so a dense pile
+    // spreads out instead of colliding mid-air.
+    [Button]
+    public bool FanPowerup()
+    {
+        // Not during a Spring's launch delay: both use the input lock.
+        if (isFanBusy || isSpringBusy) return false;
+
+        if (GetBoardItems().Count <= 0)
+            return false;
+
+        StartCoroutine(FanSequence());
+        return true;
+    }
+
+    private System.Collections.IEnumerator FanSequence()
+    {
+        isFanBusy = true;
+        InputManager.IsLocked = true;
+
+        float windStart = fanWindStartTime / fanSpeedMultiplier;
+        float throwTime = fanThrowTime / fanSpeedMultiplier;
+        float windStop = fanWindStopTime / fanSpeedMultiplier;
+
+        if (fan != null)
+            fan.Play(fanEndTime);
+
+        yield return new WaitForSeconds(windStart);
+        if (fan != null)
+            fan.StartWind();
+
+        yield return new WaitForSeconds(throwTime - windStart);
+        // TODO: whoosh sound once there is an audio system.
+#if UNITY_ANDROID || UNITY_IOS
+        Handheld.Vibrate();
+#endif
+        SetItemCollisions(false);
+
+        List<Item> boardItems = GetBoardItems();
+        for (int i = 0; i < boardItems.Count; i++)
+            ThrowToAir(boardItems[i].GetComponent<Rigidbody>());
+
+        yield return new WaitForSeconds(windStop - throwTime);
+        if (fan != null)
+            fan.StopWind();
+
+        // The end time is absolute and not sped up.
+        yield return new WaitForSeconds(Mathf.Max(0, fanEndTime - windStop));
+
+        SetItemCollisions(true);
+        InputManager.IsLocked = false;
+        isFanBusy = false;
+    }
+
+    private void ThrowToAir(Rigidbody rb)
+    {
+        float angle = UnityEngine.Random.Range(0, 360) * Mathf.Deg2Rad;
+        float up = UnityEngine.Random.Range(fanThrowUpForce.x, fanThrowUpForce.y);
+
+        Vector3 force = new Vector3(Mathf.Cos(angle) * fanThrowSideForce, up, Mathf.Sin(angle) * fanThrowSideForce);
+        Vector3 torque = new Vector3(RandomTorqueAxis(), RandomTorqueAxis(), RandomTorqueAxis());
+
+        // ForceMode.Force applied once, as in the original: it acts for one
+        // physics step, i.e. a velocity change of force * fixedDeltaTime / mass.
+        rb.AddForce(force * fanForceScale, ForceMode.Force);
+        rb.AddTorque(torque * fanForceScale, ForceMode.Force);
+    }
+
+    // Each axis 20-49 with a random sign.
+    private float RandomTorqueAxis()
+    {
+        float value = UnityEngine.Random.Range((int)fanThrowTorque.x, (int)fanThrowTorque.y);
+        return UnityEngine.Random.value < .5f ? -value : value;
+    }
+
+    private static void SetItemCollisions(bool enabled)
+    {
+        int itemsLayer = LayerMask.NameToLayer("Items");
+        Physics.IgnoreLayerCollision(itemsLayer, itemsLayer, !enabled);
+    }
+
+    // Items lying on the board: not in the rack and not mid-flight
+    // (being vacuumed or returned by Spring).
+    private List<Item> GetBoardItems()
+    {
+        List<Item> boardItems = new List<Item>();
+        Item[] items = LevelManager.instance.Items;
+
+        for (int i = 0; i < items.Length; i++)
+        {
+            if (items[i] == null || items[i].Spot != null || !items[i].IsPhysicsEnabled)
+                continue;
+
+            boardItems.Add(items[i]);
+        }
+
+        return boardItems;
+    }
+
+    private void UpdateFanVisuals()
+    {
+        if (fan == null)
+            return;
+
+        fan.UpdateVisuals(fanPUCount);
+    }
+
+    #endregion
     
     private void LoadData()
     {
         vacuumPUCount = PlayerPrefs.GetInt("VacuumPUCount", initialPUCount);
         springPUCount = PlayerPrefs.GetInt("SpringPUCount", initialPUCount);
+        fanPUCount = PlayerPrefs.GetInt("FanPUCount", initialPUCount);
         UpdateVacuumVisuals();
         UpdateSpringVisuals();
+        UpdateFanVisuals();
     }
     
     private void SaveData()
     {
         PlayerPrefs.SetInt("VacuumPUCount", vacuumPUCount);
         PlayerPrefs.SetInt("SpringPUCount", springPUCount);
+        PlayerPrefs.SetInt("FanPUCount", fanPUCount);
     }
 
 }
