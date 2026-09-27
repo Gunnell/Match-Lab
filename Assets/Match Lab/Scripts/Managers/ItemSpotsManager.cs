@@ -14,11 +14,10 @@ public class ItemSpotsManager : MonoBehaviour
     [SerializeField] private Vector3 itemLocalPositionOnSpot;
     [SerializeField] private Vector3 itemLocalScaleOnSpot;
     private bool isBusy;
+    public bool IsBusy => isBusy;
 
     [Header(" Data ")]
     private Dictionary<EItemName, ItemMergeData> itemMergeDataDictionary = new Dictionary<EItemName, ItemMergeData>();
-    // Rack items in the order they were clicked, so Spring can undo the last one.
-    private readonly List<Item> placedItems = new List<Item>();
     
     [Header(" Animation Settings")]
     [SerializeField] private float animationDuration;
@@ -62,7 +61,6 @@ public class ItemSpotsManager : MonoBehaviour
 
         isBusy = true;
         item.StoreBoardPose();
-        placedItems.Add(item);
         
         itemPickedUp?.Invoke(item);
 
@@ -180,10 +178,7 @@ public class ItemSpotsManager : MonoBehaviour
         itemMergeDataDictionary.Remove(itemMergeData.itemName);
 
         for(int i = 0; i < items.Count; i++)
-        {
             items[i].Spot.Clear();
-            placedItems.Remove(items[i]);
-        }
 
         // The spots are free immediately, but the merged items are still
         // animating. Wait for MergeManager to finish before compacting,
@@ -339,7 +334,7 @@ public class ItemSpotsManager : MonoBehaviour
         
     }
 
-    public Item ReleaseLastPlacedItem()
+    public Item ReleaseLastItemOnRack()
     {
         if (isBusy)
         {
@@ -347,13 +342,14 @@ public class ItemSpotsManager : MonoBehaviour
             return null;
         }
 
-        if (placedItems.Count <= 0)
+        ItemSpot spot = GetLastOccupiedSpot();
+
+        if (spot == null)
             return null;
 
         isBusy = true;
 
-        Item item = placedItems[placedItems.Count - 1];
-        placedItems.RemoveAt(placedItems.Count - 1);
+        Item item = spot.Item;
 
         RemoveItemFromMergeData(item);
 
@@ -363,6 +359,18 @@ public class ItemSpotsManager : MonoBehaviour
         MoveAllItemsToLeft(() => isBusy = false);
 
         return item;
+    }
+
+    // The rack is always compacted to the left, so this is the rightmost item.
+    private ItemSpot GetLastOccupiedSpot()
+    {
+        for (int i = spots.Length - 1; i >= 0; i--)
+        {
+            if (!spots[i].IsEmpty())
+                return spots[i];
+        }
+
+        return null;
     }
 
     private void RemoveItemFromMergeData(Item item)

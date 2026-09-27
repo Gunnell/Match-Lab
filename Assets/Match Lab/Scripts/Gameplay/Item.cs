@@ -69,6 +69,8 @@ public class Item : MonoBehaviour
         collider.enabled = false;
     }
     
+    public bool IsPhysicsEnabled => !GetComponent<Rigidbody>().isKinematic;
+
     public void EnablePhysics()
     {
         GetComponent<Rigidbody>().isKinematic = false;
