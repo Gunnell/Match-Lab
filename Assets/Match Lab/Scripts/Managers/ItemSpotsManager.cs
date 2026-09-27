@@ -1,7 +1,6 @@
 using UnityEngine;
 using System;
 using System.Collections.Generic;
-using Random = UnityEngine.Random;
 
 public class ItemSpotsManager : MonoBehaviour
 {
@@ -18,6 +17,8 @@ public class ItemSpotsManager : MonoBehaviour
 
     [Header(" Data ")]
     private Dictionary<EItemName, ItemMergeData> itemMergeDataDictionary = new Dictionary<EItemName, ItemMergeData>();
+    // Rack items in the order they were clicked, so Spring can undo the last one.
+    private readonly List<Item> placedItems = new List<Item>();
     
     [Header(" Animation Settings")]
     [SerializeField] private float animationDuration;
@@ -60,6 +61,8 @@ public class ItemSpotsManager : MonoBehaviour
         }
 
         isBusy = true;
+        item.StoreBoardPose();
+        placedItems.Add(item);
         
         itemPickedUp?.Invoke(item);
 
@@ -177,7 +180,10 @@ public class ItemSpotsManager : MonoBehaviour
         itemMergeDataDictionary.Remove(itemMergeData.itemName);
 
         for(int i = 0; i < items.Count; i++)
+        {
             items[i].Spot.Clear();
+            placedItems.Remove(items[i]);
+        }
 
         // The spots are free immediately, but the merged items are still
         // animating. Wait for MergeManager to finish before compacting,
@@ -333,7 +339,7 @@ public class ItemSpotsManager : MonoBehaviour
         
     }
 
-    public Item ReleaseRandomItem(Action completeCallback)
+    public Item ReleaseLastPlacedItem()
     {
         if (isBusy)
         {
@@ -341,25 +347,20 @@ public class ItemSpotsManager : MonoBehaviour
             return null;
         }
 
-        ItemSpot spot = GetRandomOccupiedSpot();
-
-        if (spot == null)
+        if (placedItems.Count <= 0)
             return null;
 
         isBusy = true;
 
-        Item item = spot.Item;
+        Item item = placedItems[placedItems.Count - 1];
+        placedItems.RemoveAt(placedItems.Count - 1);
 
         RemoveItemFromMergeData(item);
 
-        spot.Clear();
+        item.Spot.Clear();
         item.UnassignSpot();
 
-        MoveAllItemsToLeft(() =>
-        {
-            isBusy = false;
-            completeCallback?.Invoke();
-        });
+        MoveAllItemsToLeft(() => isBusy = false);
 
         return item;
     }
@@ -375,23 +376,4 @@ public class ItemSpotsManager : MonoBehaviour
         if (items.Count <= 0)
             itemMergeDataDictionary.Remove(item.ItemName);
     }
-
-    public ItemSpot GetRandomOccupiedSpot()
-    {
-        List<ItemSpot> occupiedSpots = new List<ItemSpot>();
-        for (int i = 0; i < spots.Length; i++)
-        {
-            if (!spots[i].IsEmpty())
-            {
-                occupiedSpots.Add(spots[i]); 
-            }
-        }
-
-        if (occupiedSpots.Count <= 0)
-            return null;
-        
-        return occupiedSpots[Random.Range(0, occupiedSpots.Count)];
-
-    }
 }
-

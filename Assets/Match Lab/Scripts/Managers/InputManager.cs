@@ -34,21 +34,28 @@ public class InputManager : MonoBehaviour
         {
             HandleDrag();
         }
-        else if(Input.GetMouseButtonUp(0))
+
+        // Not chained to the checks above: a tap can press and release in
+        // the same frame, and the release must still be handled.
+        if(Input.GetMouseButtonUp(0))
         {
             HandleMouseUp();
         }
     }
 
     private void HandleMouseDown()
-    { 
+    {
         Physics.Raycast(Camera.main.ScreenPointToRay(Input.mousePosition), out RaycastHit hit, 100, powerupLayer);
 
-        if (hit.collider == null)
+        if (hit.collider != null && hit.collider.TryGetComponent(out Powerup powerup))
+        {
+            powerupClicked?.Invoke(powerup);
             return;
+        }
 
-        powerupClicked?.Invoke(hit.collider.GetComponent<Powerup>());
-
+        // Select on press too, otherwise a quick tap that never reaches a
+        // drag frame selects nothing and the release is ignored.
+        HandleDrag();
     }
 
     private void HandleDrag()

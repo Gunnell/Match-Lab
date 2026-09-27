@@ -33,6 +33,11 @@ public class GameManager : MonoBehaviour
 
     public void SetGameState(EGameState gameState)
     {
+        // Win and lose are final until the scene reloads. Without this a late
+        // gameover check or the timer could overwrite a win (or vice versa).
+        if (this.gameState == EGameState.LEVELCOMPLETE || this.gameState == EGameState.GAMEOVER)
+            return;
+
         this.gameState = gameState;
 
        IEnumerable<IGameStateListener> gameStateListeners

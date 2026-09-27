@@ -25,6 +25,7 @@ public class GoalManager : MonoBehaviour
         LevelManager.levelSpawned += OnLevelSpawned;
         ItemSpotsManager.itemPickedUp += OnItemPickedUp;
         PowerUpManager.itemPickedUp += OnItemPickedUp;
+        PowerUpManager.itemBackToGame += OnItemBackToGame;
     }
 
     void Start()
@@ -39,6 +40,7 @@ public class GoalManager : MonoBehaviour
         LevelManager.levelSpawned -= OnLevelSpawned;
         ItemSpotsManager.itemPickedUp -= OnItemPickedUp;
         PowerUpManager.itemPickedUp -= OnItemPickedUp;
+        PowerUpManager.itemBackToGame -= OnItemBackToGame;
     }
     
 
@@ -70,6 +72,10 @@ public class GoalManager : MonoBehaviour
             if (!goals[i].itemPrefab.ItemName.Equals(item.ItemName))
                 continue;
             
+            // Already complete: an extra pickup must not re-trigger completion.
+            if (goals[i].amount <= 0)
+                break;
+
             goals[i].amount--;
 
             if (goals[i].amount <= 0)
@@ -77,7 +83,24 @@ public class GoalManager : MonoBehaviour
             else
                 goalCards[i].UpdateAmount(goals[i].amount);
             break;
-            
+
+        }
+    }
+
+    // Spring puts an item back on the board, so it has to count again.
+    private void OnItemBackToGame(Item item)
+    {
+        for (int i = 0; i < goals.Length; i++)
+        {
+            if (!goals[i].itemPrefab.ItemName.Equals(item.ItemName))
+                continue;
+
+            if (goals[i].amount <= 0)
+                break;
+
+            goals[i].amount++;
+            goalCards[i].UpdateAmount(goals[i].amount);
+            break;
         }
     }
 
