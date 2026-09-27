@@ -8,8 +8,15 @@ public class PowerUpManager : MonoBehaviour
     [Header(" Vacuum Elements")]
     [SerializeField] private Vacuum vacuum;
     [SerializeField] private Transform vacuumEndPosition;
+
+    [Header(" Spring Elements ")]
+    [SerializeField] private Spring spring;
+    // A little slower than the rack add animation so the return reads clearly.
+    [SerializeField] private float springReturnDuration = .3f;
+    [SerializeField] private LeanTweenType springReturnEasing = LeanTweenType.easeInOutCubic;
     [Header(" Actions ")] 
     public static Action<Item> itemPickedUp;
+    public static Action<Item> itemBackToGame;
 
     [Header(" Settings ")] 
     private bool isBusy;
@@ -19,12 +26,13 @@ public class PowerUpManager : MonoBehaviour
     [Header(" Data ")]
     [SerializeField] private int initialPUCount;
     private int vacuumPUCount;
+    private int springPUCount;
 
     private void Awake()
     {
-        LoadData();
         Vacuum.started += OnVacuumStarted;
         InputManager.powerupClicked += OnPowerupClicked;
+        LoadData();
     }
 
     private void OnDestroy()
@@ -36,7 +44,7 @@ public class PowerUpManager : MonoBehaviour
 
     private void OnPowerupClicked(Powerup powerup)
     {
-        if (isBusy) return;
+        if (isBusy || powerup == null) return;
 
         switch (powerup.Type)
         {
@@ -44,30 +52,39 @@ public class PowerUpManager : MonoBehaviour
                 HandleVacuumClicked();
                 UpdateVacuumVisuals();
                 break;
+
+            case EPowerupType.Spring:
+                HandleSpringClicked();
+                UpdateSpringVisuals();
+                break;
         }
 
     }
 
     private void HandleVacuumClicked()
     {
-        
         if (vacuumPUCount <= 0)
         {
+            // TODO: rewarded video / coins. Free refill placeholder for now.
             vacuumPUCount = 3;
             SaveData();
+            return;
         }
-        else
-        {
-           // isBusy = true;
-            vacuumPUCount--; 
-            SaveData();
-            vacuum.Play();
-        } 
+
+        // Don't spend a charge when there is nothing to collect.
+        if (GetVacuumTargets().Count <= 0)
+            return;
+
+        // Busy from the click, not from the animation event, so tapping
+        // again while the vacuum animation plays can't spend a second charge.
+        isBusy = true;
+        vacuumPUCount--;
+        SaveData();
+        vacuum.Play();
     }
 
     private void OnVacuumStarted()
     {
-        if (isBusy) return; //g
         VacuumPowerup();
     }
 
@@ -86,40 +103,17 @@ public class PowerUpManager : MonoBehaviour
     [Button]
     private void VacuumPowerup()
     {
-         // Collect 3 target/ goal items from the board 
-         // Grab items
-         // Grab the goal items
-         // Grab the goal that has the greatest amount
-         // Grab 3 items
-         Item[] items = LevelManager.instance.Items;
-         ItemLevelData[] goals = GoalManager.instance.Goals;
-         ItemLevelData? greatestGoal = GetGreatestGoal(goals);
+         // The board may have changed between the click and the animation
+         // event, so the targets are looked up again here.
+         List<Item> itemsToCollect = GetVacuumTargets();
 
-         if (greatestGoal == null)
-             return;
-         
-         ItemLevelData goal = (ItemLevelData)greatestGoal;
-         
-         List<Item> itemsToCollect = new List<Item>();
-         for(int i = 0; i < items.Length; i++)
+         if (itemsToCollect.Count <= 0)
          {
-             if(items[i] == null)
-                 continue;
-             if(items[i].Spot != null)
-                 continue;
-             if(items[i].ItemName == goal.itemPrefab.ItemName)
-             {
-                 itemsToCollect.Add(items[i]);
-                 
-                 if (itemsToCollect.Count >= 3)
-                     break; 
-             }
-         }
-         
-         if(itemsToCollect.Count <= 0)
+             isBusy = false;
              return;
-         
-         isBusy = true; //g
+         }
+
+         isBusy = true;
          vacuumCounter = 0;
          vacuumItemsToCollect = itemsToCollect.Count;
 
@@ -163,6 +157,37 @@ public class PowerUpManager : MonoBehaviour
 
     }
 
+    // Up to 3 board items of the goal with the greatest remaining amount.
+    private List<Item> GetVacuumTargets()
+    {
+        List<Item> targets = new List<Item>();
+
+        ItemLevelData? greatestGoal = GetGreatestGoal(GoalManager.instance.Goals);
+
+        if (greatestGoal == null)
+            return targets;
+
+        EItemName goalName = greatestGoal.Value.itemPrefab.ItemName;
+        Item[] items = LevelManager.instance.Items;
+
+        for (int i = 0; i < items.Length; i++)
+        {
+            if (items[i] == null)
+                continue;
+            if (items[i].Spot != null)
+                continue;
+            if (items[i].ItemName != goalName)
+                continue;
+
+            targets.Add(items[i]);
+
+            if (targets.Count >= 3)
+                break;
+        }
+
+        return targets;
+    }
+
     private void ItemReachedVacuum(Item item)
     {
          vacuumCounter++;
@@ -195,33 +220,84 @@ public class PowerUpManager : MonoBehaviour
     }
     private void UpdateVacuumVisuals()
     {
+        if (vacuum == null)
+            return;
+
         vacuum.UpdateVisuals(vacuumPUCount);
     }
     #endregion
     
     #region Spring Powerup
 
-    [Button]
-    public void SpringPowerup()
+    private void HandleSpringClicked()
     {
-        if (isBusy) return;
+        if (springPUCount <= 0)
+        {
+            // TODO: rewarded video. Same free refill placeholder as the vacuum.
+            springPUCount = 3;
+            SaveData();
+            return;
+        }
+
+        // Only spend a charge if an item actually came off the rack, otherwise
+        // a click on a full-but-busy board would eat one for nothing.
+        if (!SpringPowerup())
+            return;
+
+        springPUCount--;
+        SaveData();
+    }
+
+    [Button]
+    public bool SpringPowerup()
+    {
+        if (isBusy) return false;
 
         isBusy = true;
 
-        Item itemToRelease = ItemSpotsManager.instance.ReleaseRandomItem(() => isBusy = false);
+        Item itemToRelease = ItemSpotsManager.instance.ReleaseLastPlacedItem();
 
         if (itemToRelease == null)
         {
             isBusy = false;
-            return;
+            return false;
         }
 
-        itemToRelease.transform.parent = LevelManager.instance.ItemParent;
-        itemToRelease.RestoreScale();
-        
-        itemToRelease.EnablePhysics();
-        itemToRelease.EnableShadows();
+        // Not itemPickedUp: the goal count goes back up instead.
+        itemBackToGame?.Invoke(itemToRelease);
 
+        ReturnItemToBoard(itemToRelease);
+
+        return true;
+    }
+
+    // Plays the rack's add animation in reverse: the item retraces its path
+    // back to where it was picked, then physics takes over again.
+    private void ReturnItemToBoard(Item item)
+    {
+        item.transform.parent = LevelManager.instance.ItemParent;
+        LeanTween.cancel(item.gameObject);
+
+        LeanTween.move(item.gameObject, item.BoardPosition, springReturnDuration)
+            .setEase(springReturnEasing);
+        LeanTween.rotate(item.gameObject, item.BoardRotation.eulerAngles, springReturnDuration)
+            .setEase(springReturnEasing);
+        LeanTween.scale(item.gameObject, item.BaseScale, springReturnDuration)
+            .setEase(springReturnEasing)
+            .setOnComplete(() =>
+            {
+                item.EnablePhysics();
+                item.EnableShadows();
+                isBusy = false;
+            });
+    }
+
+    private void UpdateSpringVisuals()
+    {
+        if (spring == null)
+            return;
+
+        spring.UpdateVisuals(springPUCount);
     }
 
     #endregion
@@ -229,12 +305,15 @@ public class PowerUpManager : MonoBehaviour
     private void LoadData()
     {
         vacuumPUCount = PlayerPrefs.GetInt("VacuumPUCount", initialPUCount);
+        springPUCount = PlayerPrefs.GetInt("SpringPUCount", initialPUCount);
         UpdateVacuumVisuals();
+        UpdateSpringVisuals();
     }
     
     private void SaveData()
     {
         PlayerPrefs.SetInt("VacuumPUCount", vacuumPUCount);
+        PlayerPrefs.SetInt("SpringPUCount", springPUCount);
     }
 
 }

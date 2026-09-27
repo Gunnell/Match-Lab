@@ -19,6 +19,10 @@ public class Item : MonoBehaviour
 
     private Material baseMaterial;
     private Vector3 baseScale;
+    private Vector3 boardPosition;
+    public Vector3 BoardPosition => boardPosition;
+    private Quaternion boardRotation;
+    public Quaternion BoardRotation => boardRotation;
     // [SerializeField] private Collider collider;
 
     private void Awake()
@@ -28,11 +32,18 @@ public class Item : MonoBehaviour
     }
 
     /// <summary>
-    /// Undoes the shrink applied when the item was moved onto a spot.
-    /// Call after reparenting, the parent's scale feeds into localScale.
+    /// The local scale the item had on the board, before it was shrunk onto a spot.
     /// </summary>
-    public void RestoreScale()
-        => transform.localScale = baseScale;
+    public Vector3 BaseScale => baseScale;
+
+    /// <summary>
+    /// Remembers how the item lay on the board, so Spring can send it back there.
+    /// </summary>
+    public void StoreBoardPose()
+    {
+        boardPosition = transform.position;
+        boardRotation = transform.rotation;
+    }
 
     public void AssignSpot(ItemSpot spot)
         => this.spot = spot;
