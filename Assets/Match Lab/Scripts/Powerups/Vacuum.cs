@@ -17,7 +17,10 @@ public class Vacuum : Powerup
     
     public void Play()
     {
-        animator.Play("Activate");
+        // Restart from 0. Play("Activate") alone keeps a running clip going,
+        // so a tap late in the previous activation would never reach the
+        // TriggerPowerupStart event again and the vacuum would stay busy.
+        animator.Play("Activate", 0, 0f);
     }
 
     

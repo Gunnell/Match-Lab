@@ -1585,8 +1585,8 @@ Animator:
   m_CorrespondingSourceObject: {fileID: 7794815818046690453, guid: 73fc18920915a614e9e350ade3a95b05, type: 3}
   m_PrefabInstance: {fileID: 255609582}
   m_PrefabAsset: {fileID: 0}
---- !u!135 &601211591
-SphereCollider:
+--- !u!65 &601211591
+BoxCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -1600,12 +1600,12 @@ SphereCollider:
     serializedVersion: 2
     m_Bits: 0
   m_LayerOverridePriority: 0
-  m_IsTrigger: 1
+  m_IsTrigger: 0
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Radius: 0.68941855
-  m_Center: {x: 0, y: 0.92815495, z: -3.719364e-16}
+  m_Size: {x: 1.6824745, y: 2.465582, z: 1.4099067}
+  m_Center: {x: 0.12434405, y: 0.8505397, z: -0.11170608}
 --- !u!1 &616179663
 GameObject:
   m_ObjectHideFlags: 0
@@ -2292,6 +2292,7 @@ MonoBehaviour:
   gamePanel: {fileID: 1307132893}
   levelCompletedPanel: {fileID: 557235968}
   gameOverPanel: {fileID: 406199966}
+  levelCompletePanelDelay: 2.5
 --- !u!1 &917726614
 GameObject:
   m_ObjectHideFlags: 0
@@ -4060,8 +4061,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1691047895}
-  - component: {fileID: 1691047896}
   - component: {fileID: 1691047894}
+  - component: {fileID: 1691047896}
   m_Layer: 6
   m_Name: Spring
   m_TagString: Untagged
@@ -4100,8 +4101,8 @@ Transform:
   - {fileID: 1116962144}
   m_Father: {fileID: 553862917}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!135 &1691047896
-SphereCollider:
+--- !u!65 &1691047896
+BoxCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -4115,12 +4116,12 @@ SphereCollider:
     serializedVersion: 2
     m_Bits: 0
   m_LayerOverridePriority: 0
-  m_IsTrigger: 1
+  m_IsTrigger: 0
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Radius: 0.68941855
-  m_Center: {x: 0, y: 0.92815495, z: -3.719364e-16}
+  m_Size: {x: 1.5155815, y: 1.7882082, z: 1.369667}
+  m_Center: {x: 0.20779079, y: 0.51185286, z: -0.13182592}
 --- !u!4 &1747539669 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 18453508043923217, guid: 23e4876a790d34524a85dd4ceb924b24, type: 3}

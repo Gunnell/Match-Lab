@@ -19,9 +19,16 @@ public class PowerUpManager : MonoBehaviour
     public static Action<Item> itemBackToGame;
 
     [Header(" Settings ")] 
-    private bool isBusy;
+    // Each powerup has its own busy flag so using one never blocks the other.
+    private bool isVacuumBusy;
+    private bool isSpringBusy;
+    // Spring tapped while the rack was animating; fired once the rack is free.
+    private bool springQueued;
     private int vacuumItemsToCollect;
     private int vacuumCounter;
+    // One charge starts exactly one collection, even if the Activate clip
+    // raises its start event more than once.
+    private bool vacuumPending;
     
     [Header(" Data ")]
     [SerializeField] private int initialPUCount;
@@ -44,7 +51,7 @@ public class PowerUpManager : MonoBehaviour
 
     private void OnPowerupClicked(Powerup powerup)
     {
-        if (isBusy || powerup == null) return;
+        if (powerup == null) return;
 
         switch (powerup.Type)
         {
@@ -63,6 +70,9 @@ public class PowerUpManager : MonoBehaviour
 
     private void HandleVacuumClicked()
     {
+        if (isVacuumBusy)
+            return;
+
         if (vacuumPUCount <= 0)
         {
             // TODO: rewarded video / coins. Free refill placeholder for now.
@@ -77,7 +87,8 @@ public class PowerUpManager : MonoBehaviour
 
         // Busy from the click, not from the animation event, so tapping
         // again while the vacuum animation plays can't spend a second charge.
-        isBusy = true;
+        isVacuumBusy = true;
+        vacuumPending = true;
         vacuumPUCount--;
         SaveData();
         vacuum.Play();
@@ -85,6 +96,10 @@ public class PowerUpManager : MonoBehaviour
 
     private void OnVacuumStarted()
     {
+        if (!vacuumPending)
+            return;
+
+        vacuumPending = false;
         VacuumPowerup();
     }
 
@@ -94,10 +109,10 @@ public class PowerUpManager : MonoBehaviour
         
     }
 
-    // Update is called once per frame
     void Update()
     {
-        
+        if (springQueued)
+            TryFireQueuedSpring();
     }
     #region Vacuum Powerup
     [Button]
@@ -109,11 +124,11 @@ public class PowerUpManager : MonoBehaviour
 
          if (itemsToCollect.Count <= 0)
          {
-             isBusy = false;
+             isVacuumBusy = false;
              return;
          }
 
-         isBusy = true;
+         isVacuumBusy = true;
          vacuumCounter = 0;
          vacuumItemsToCollect = itemsToCollect.Count;
 
@@ -178,6 +193,9 @@ public class PowerUpManager : MonoBehaviour
                 continue;
             if (items[i].ItemName != goalName)
                 continue;
+            // Mid-flight (e.g. being returned by Spring): leave it alone.
+            if (!items[i].IsPhysicsEnabled)
+                continue;
 
             targets.Add(items[i]);
 
@@ -192,7 +210,7 @@ public class PowerUpManager : MonoBehaviour
     {
          vacuumCounter++;
          if (vacuumCounter >= vacuumItemsToCollect)
-             isBusy = false;
+             isVacuumBusy = false;
          Destroy(item.gameObject);
     }
 
@@ -231,6 +249,9 @@ public class PowerUpManager : MonoBehaviour
 
     private void HandleSpringClicked()
     {
+        if (isSpringBusy || springQueued)
+            return;
+
         if (springPUCount <= 0)
         {
             // TODO: rewarded video. Same free refill placeholder as the vacuum.
@@ -239,8 +260,36 @@ public class PowerUpManager : MonoBehaviour
             return;
         }
 
-        // Only spend a charge if an item actually came off the rack, otherwise
-        // a click on a full-but-busy board would eat one for nothing.
+        // The rack is mid-animation (item flying in, merge, compaction).
+        // Don't drop the tap: fire as soon as the rack is free.
+        if (ItemSpotsManager.instance.IsBusy)
+        {
+            springQueued = true;
+            return;
+        }
+
+        FireSpring();
+    }
+
+    private void TryFireQueuedSpring()
+    {
+        if (!GameManager.instance.IsGame())
+        {
+            springQueued = false;
+            return;
+        }
+
+        if (ItemSpotsManager.instance.IsBusy)
+            return;
+
+        springQueued = false;
+        FireSpring();
+        UpdateSpringVisuals();
+    }
+
+    // Only spend a charge if an item actually came off the rack.
+    private void FireSpring()
+    {
         if (!SpringPowerup())
             return;
 
@@ -251,15 +300,15 @@ public class PowerUpManager : MonoBehaviour
     [Button]
     public bool SpringPowerup()
     {
-        if (isBusy) return false;
+        if (isSpringBusy) return false;
 
-        isBusy = true;
+        isSpringBusy = true;
 
-        Item itemToRelease = ItemSpotsManager.instance.ReleaseLastPlacedItem();
+        Item itemToRelease = ItemSpotsManager.instance.ReleaseLastItemOnRack();
 
         if (itemToRelease == null)
         {
-            isBusy = false;
+            isSpringBusy = false;
             return false;
         }
 
@@ -288,7 +337,7 @@ public class PowerUpManager : MonoBehaviour
             {
                 item.EnablePhysics();
                 item.EnableShadows();
-                isBusy = false;
+                isSpringBusy = false;
             });
     }
 
