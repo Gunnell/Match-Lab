@@ -80,11 +80,12 @@ MonoBehaviour:
   backOfCard: {fileID: 4682422696230837743}
   checkMark: {fileID: 7520098422310416354}
   completeAnimator: {fileID: 8425552522094701301}
-  burstSprite: {fileID: 21300000, guid: f26bdaf1f232340a4ab955bb1ca2104e, type: 3}
+  sparkleSprite: {fileID: 21300000, guid: d8d924531f524c0f9240627fd8252fad, type: 3}
   hitScale: 1.18
   hitUp: 0.033
   hitDown: 0.15
-  hitBurstColor: {r: 1, g: 1, b: 1, a: 0.9}
+  hitSparkleCount: 20
+  hitSparkleOffset: 74
   completeScale: 1.3
   completeScaleTime: 0.083
   wobbleAngles:
@@ -106,7 +107,8 @@ MonoBehaviour:
   removeDelay: 0.3
   checkPopScale: 1.45
   checkPopTime: 0.1
-  completeBurstColor: {r: 1, g: 0.95, b: 0.6, a: 1}
+  completeSparkleStart: 0.1
+  completeSparklesPerSecond: 180
 --- !u!95 &8425552522094701301
 Animator:
   serializedVersion: 7

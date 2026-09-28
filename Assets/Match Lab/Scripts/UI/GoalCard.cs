@@ -13,14 +13,16 @@ public class GoalCard : MonoBehaviour
     [SerializeField] private GameObject checkMark;
     [Tooltip("Old Complete clip. Kept but no longer used: the complete animation is driven in code.")]
     [SerializeField] private Animator completeAnimator;
-    [Tooltip("Dot sprite for the hit / complete bursts.")]
-    [SerializeField] private Sprite burstSprite;
+    [Tooltip("Star sprite for the hit and complete sparkles, tinted gold in code.")]
+    [SerializeField] private Sprite sparkleSprite;
 
     [Header(" Hit (goal item collected) ")]
     [SerializeField] private float hitScale = 1.18f;
     [SerializeField] private float hitUp = .033f;
     [SerializeField] private float hitDown = .15f;
-    [SerializeField] private Color hitBurstColor = new Color(1f, 1f, 1f, .9f);
+    [SerializeField] private int hitSparkleCount = 20;
+    [Tooltip("Hit sparkles burst from this far below the card centre (card space, px).")]
+    [SerializeField] private float hitSparkleOffset = 74f;
 
     [Header(" Complete ")]
     [Tooltip("Pop size when completing. The card stays at this size through wobble, spin and hold, then shrinks to 0.")]
@@ -38,7 +40,9 @@ public class GoalCard : MonoBehaviour
     [SerializeField] private float removeDelay = .3f;
     [SerializeField] private float checkPopScale = 1.45f;
     [SerializeField] private float checkPopTime = .1f;
-    [SerializeField] private Color completeBurstColor = new Color(1f, .95f, .6f, 1f);
+    [Tooltip("The outline sparkles start this long after the pop begins.")]
+    [SerializeField] private float completeSparkleStart = .1f;
+    [SerializeField] private float completeSparklesPerSecond = 180f;
 
     // Not cached in Awake: cards are created under the game panel while it is
     // still inactive, so Awake hasn't run when the deal-in starts.
@@ -127,7 +131,7 @@ public class GoalCard : MonoBehaviour
         PlayHit();
     }
 
-    // Quick snap up and settle, with a small burst under the card.
+    // Quick snap up and settle, with a sparkle burst under the card.
     private void PlayHit()
     {
         if (isCompleting)
@@ -149,15 +153,17 @@ public class GoalCard : MonoBehaviour
         }
 
         RectTransform parent = rect.parent as RectTransform;
-        Vector2 bottom = rect.anchoredPosition + new Vector2(0, -rect.rect.height * rect.pivot.y);
-        UiBurst.Play(parent, AnchoredToLocal(parent, bottom), burstSprite, hitBurstColor,
-            7, new Vector2(30, 60), new Vector2(200, 340), 16, .3f);
+        Vector3 below = transform.TransformPoint(rect.rect.center + new Vector2(0, -hitSparkleOffset));
+        UiSparkleEmitter.Burst(parent, parent.InverseTransformPoint(below), sparkleSprite,
+            UiSparkleEmitter.Hit, hitSparkleCount);
 
         // TODO: hit sound + haptic once there is an audio system.
     }
 
     // Checkmark pops, card pops and wobbles, spins, holds, shrinks away,
-    // then onRemoved lets the other cards slide over.
+    // then onRemoved lets the other cards slide over. From just after the pop
+    // the card sheds sparkles from its outline; they keep flowing from where
+    // it was for removeDelay after it vanishes, so it dissolves into them.
     public void Complete(Action onRemoved)
     {
         if (isCompleting)
@@ -187,9 +193,6 @@ public class GoalCard : MonoBehaviour
         // Drawn on top; positions are ours, so sibling order doesn't affect the layout.
         transform.SetAsLastSibling();
 
-        RectTransform parent = rect.parent as RectTransform;
-        UiBurst.Play(parent, AnchoredToLocal(parent, rect.anchoredPosition), burstSprite, completeBurstColor,
-            14, new Vector2(70, 130), new Vector2(0, 360), 22, .45f);
         // TODO: complete sound + haptic once there is an audio system.
 
         GameObject check = checkMark;
@@ -201,6 +204,7 @@ public class GoalCard : MonoBehaviour
 
         // Every step is scheduled from t = 0, so frame hiccups can't stretch
         // the sequence. Wobble around Z: each step eases from the previous angle.
+        float start = Time.time;
         float at = 0, angle = 0;
         for (int i = 0; i < wobbleAngles.Length && i < wobbleTimes.Length; i++)
         {
@@ -219,13 +223,35 @@ public class GoalCard : MonoBehaviour
         LeanTween.scale(gameObject, Vector3.zero, shrinkTime).setDelay(at).setEase(LeanTweenType.easeOutSine);
         at += shrinkTime;
 
-        yield return new WaitForSeconds(at);
+        // The emitter lives in the lane, not on the card, so its sparkles stay
+        // where they were emitted and outlive the card.
+        // Waits are measured from start too, so a hitch can't leave the
+        // emitter behind the tweens (card gone, emitter not yet detached).
+        yield return WaitUntilTime(start + Mathf.Min(completeSparkleStart, at));
 
-        // Invisible at scale 0; hold the gap, then leave the layout.
-        yield return new WaitForSeconds(removeDelay);
+        UiSparkleEmitter sparkles = UiSparkleEmitter.Create((RectTransform)rect.parent, sparkleSprite, UiSparkleEmitter.Outline);
+        sparkles.Play(rect, completeSparklesPerSecond);
+
+        yield return WaitUntilTime(start + at);
+
+        // Invisible at scale 0: keep emitting from its full-size outline for
+        // the gap, then stop (live sparkles fade out) and leave the layout.
+        if (sparkles != null)
+            sparkles.Detach();
+
+        yield return WaitUntilTime(start + at + removeDelay);
+
+        if (sparkles != null)
+            sparkles.Stop();
 
         gameObject.SetActive(false);
         onRemoved?.Invoke();
+    }
+
+    private static IEnumerator WaitUntilTime(float time)
+    {
+        while (Time.time < time)
+            yield return null;
     }
 
     private void CancelTween(int id)
@@ -236,14 +262,4 @@ public class GoalCard : MonoBehaviour
 
     private void SetX(float x)
         => rect.anchoredPosition = new Vector2(x, rect.anchoredPosition.y);
-
-    // The card's anchoredPosition is relative to the lane's top-left anchor;
-    // the bursts use the lane's own local space.
-    private Vector2 AnchoredToLocal(RectTransform parent, Vector2 anchored)
-    {
-        Vector2 anchorPoint = new Vector2(
-            parent.rect.xMin + parent.rect.width * rect.anchorMin.x,
-            parent.rect.yMin + parent.rect.height * rect.anchorMin.y);
-        return anchorPoint + anchored;
-    }
 }
