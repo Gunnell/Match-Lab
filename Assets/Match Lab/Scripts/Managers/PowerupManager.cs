@@ -8,6 +8,30 @@ public class PowerUpManager : MonoBehaviour
     [Header(" Vacuum Elements")]
     [SerializeField] private Vacuum vacuum;
     [SerializeField] private Transform vacuumEndPosition;
+    [Tooltip("How long to wait for a busy rack before re-planning, then giving up with a refund.")]
+    [SerializeField] private float vacuumRackWaitTimeout = 2f;
+    // Flight: each item follows a cubic Bezier (start, ctrl, approach, nozzle)
+    // at constant speed, easing in so it speeds up into the nozzle.
+    [Tooltip("The approach point sits this far from the nozzle toward the board, so items come in from the board side.")]
+    [SerializeField] private float vacuumApproachDistance = 1.1f;
+    [Tooltip("Board items: control point moves toward the nozzle in x by at most this much.")]
+    [SerializeField] private float vacuumBoardCtrlMaxX = 2.1f;
+    [Tooltip("Board items: control point this high above the top of the pile.")]
+    [SerializeField] private float vacuumBoardCtrlLift = .6f;
+    [Tooltip("Board items: control point this far into the board from the start.")]
+    [SerializeField] private float vacuumBoardCtrlZ = 1.25f;
+    [Tooltip("Rack items: control point moves toward the nozzle in x by at most this much.")]
+    [SerializeField] private float vacuumRackCtrlMaxX = 1.6f;
+    [Tooltip("Rack items: control point this far into the board from the start (kept at rack height).")]
+    [SerializeField] private float vacuumRackCtrlZ = 2.7f;
+    [Tooltip("Seconds per metre of path, board items.")]
+    [SerializeField] private float vacuumBoardSecondsPerMetre = .09f;
+    [Tooltip("Seconds per metre of path, rack items.")]
+    [SerializeField] private float vacuumRackSecondsPerMetre = .12f;
+    [SerializeField] private float vacuumStagger = .35f;
+    [SerializeField] private int vacuumPathSamples = 25;
+    [SerializeField] private float vacuumSwellScale = 1.42f;
+    [SerializeField] private float vacuumArrivalScale = .45f;
 
     [Header(" Spring Elements ")]
     [SerializeField] private Spring spring;
@@ -35,7 +59,7 @@ public class PowerUpManager : MonoBehaviour
     [SerializeField] private float springForwardForce = 275f;
     [SerializeField] private float springForwardMultiplier = 2.15f;
     [SerializeField] private Vector2 springTorqueRange = new Vector2(40, 120);
-    [Tooltip("Scales the original forces to this world, like fanForceScale. The Fan's .28 is too weak here: "
+    [Tooltip("Scales the launch forces to this world, like fanForceScale. The Fan's .28 is too weak here: "
         + "the button sits behind the board's front wall, and at .28 the item lands inside that wall. "
         + ".75 carries it well into the board (lands between the front third and the middle, depending on the pile).")]
     [SerializeField] private float springForceScale = .75f;
@@ -51,8 +75,7 @@ public class PowerUpManager : MonoBehaviour
 
     [Header(" Fan Elements ")]
     [SerializeField] private Fan fan;
-    // Timeline and forces follow Match Factory's Shuffle booster.
-    [Tooltip("Divides every step except the end time (ShuffleBoosterSpeedMultiplier).")]
+    [Tooltip("Divides every step except the end time.")]
     [SerializeField] private float fanSpeedMultiplier = 1f;
     [SerializeField] private float fanWindStartTime = .33f;
     [SerializeField] private float fanThrowTime = .4f;
@@ -62,7 +85,7 @@ public class PowerUpManager : MonoBehaviour
     [SerializeField] private Vector2 fanThrowUpForce = new Vector2(650, 750);
     [SerializeField] private float fanThrowSideForce = 300;
     [SerializeField] private Vector2 fanThrowTorque = new Vector2(20, 50);
-    [Tooltip("Scales the original forces to this world. At 1 an item (mass 1) is thrown ~10 m up, "
+    [Tooltip("Scales the throw forces to this world. At 1 an item (mass 1) is thrown ~10 m up, "
         + "past the camera; .28 lands it inside the 0.8s window before collisions return.")]
     [SerializeField] private float fanForceScale = .28f;
     [Header(" Actions ")] 
@@ -81,6 +104,18 @@ public class PowerUpManager : MonoBehaviour
     // One charge starts exactly one collection, even if the Activate clip
     // raises its start event more than once.
     private bool vacuumPending;
+    private VacuumPlan vacuumPlan;
+    // Whether the running use paid a charge (the editor button doesn't), so an abort only refunds what was spent.
+    private bool vacuumChargeSpent;
+
+    // What one Vacuum use collects: always 3 items of one goal type, the
+    // rack copies first, the rest from the board.
+    private class VacuumPlan
+    {
+        public EItemName type;
+        public readonly List<Item> fromRack = new List<Item>();
+        public readonly List<Item> fromBoard = new List<Item>();
+    }
     
     [Header(" Data ")]
     [SerializeField] private int initialPUCount;
@@ -142,15 +177,19 @@ public class PowerUpManager : MonoBehaviour
         }
 
         // Don't spend a charge when there is nothing to collect.
-        if (GetVacuumTargets().Count <= 0)
+        VacuumPlan plan = BuildVacuumPlan();
+        if (plan == null)
             return;
 
-        // Busy from the click, not from the animation event, so tapping
-        // again while the vacuum animation plays can't spend a second charge.
-        isVacuumBusy = true;
-        vacuumPending = true;
+        // Locked from the tap until the flight starts, so the planned items
+        // can't be tapped away during the animation.
         vacuumPUCount--;
         SaveData();
+        vacuumChargeSpent = true;
+        isVacuumBusy = true;
+        InputManager.Lock();
+        vacuumPlan = plan;
+        vacuumPending = true;
         vacuum.Play();
     }
 
@@ -160,7 +199,7 @@ public class PowerUpManager : MonoBehaviour
             return;
 
         vacuumPending = false;
-        VacuumPowerup();
+        StartCoroutine(VacuumSequence());
     }
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
@@ -179,92 +218,291 @@ public class PowerUpManager : MonoBehaviour
     [Button]
     private void VacuumPowerup()
     {
-         // The board may have changed between the click and the animation
-         // event, so the targets are looked up again here.
-         List<Item> itemsToCollect = GetVacuumTargets();
+        // Editor test button: run a full use without the animation.
+        if (isVacuumBusy) return;
 
-         if (itemsToCollect.Count <= 0)
-         {
-             isVacuumBusy = false;
-             return;
-         }
+        vacuumPlan = BuildVacuumPlan();
+        if (vacuumPlan == null) return;
 
-         isVacuumBusy = true;
-         vacuumCounter = 0;
-         vacuumItemsToCollect = itemsToCollect.Count;
-
-
-         for (int i = 0; i < itemsToCollect.Count; i++)
-         {
-             itemsToCollect[i].DisablePhysics();
-             
-             Item itemToCollect = itemsToCollect[i];
-             List<Vector3> points = new List<Vector3>();
-             
-             points.Add(itemsToCollect[i].transform.position);
-             points.Add(itemsToCollect[i].transform.position);
-             
-             points.Add(itemsToCollect[i].transform.position + Vector3.up * 2);
-             points.Add(vacuumEndPosition.position + Vector3.up * 2);
-             
-             points.Add(vacuumEndPosition.position);
-             points.Add(vacuumEndPosition.position);
-
-
-
-
-             LeanTween.moveSpline(itemsToCollect[i].gameObject, points.ToArray(), .8f)
-                 .setOnComplete(() => ItemReachedVacuum(itemToCollect));
-             
-             
-            /* LeanTween.move(itemsToCollect[i].gameObject, vacuumEndPosition.position, .5f)
-                 .setEase(LeanTweenType.easeInCubic)
-                 .setOnComplete(() => ItemReachedVacuum(itemToCollect)); */
-             
-             LeanTween.scale(itemsToCollect[i].gameObject, Vector3.zero, .8f);
-         }
-
-         for (int i = itemsToCollect.Count-1; i >= 0; i--)
-         {
-             itemPickedUp?.Invoke(itemsToCollect[i]);
-             //Destroy(itemsToCollect[i].gameObject);
-         }
-
-
+        vacuumChargeSpent = false;
+        isVacuumBusy = true;
+        InputManager.Lock();
+        StartCoroutine(VacuumSequence());
     }
 
-    // Up to 3 board items of the goal with the greatest remaining amount.
-    private List<Item> GetVacuumTargets()
+    private System.Collections.IEnumerator VacuumSequence()
     {
-        List<Item> targets = new List<Item>();
+        float waited = 0;
+        bool replannedAfterTimeout = false;
 
-        ItemLevelData? greatestGoal = GetGreatestGoal(GoalManager.instance.Goals);
+        while (true)
+        {
+            if (!GameManager.instance.IsGame())
+            {
+                AbortVacuum();
+                yield break;
+            }
 
-        if (greatestGoal == null)
-            return targets;
+            // Input was locked since the tap, but a merge or compaction can
+            // still have moved things. Re-plan if the stored items went stale.
+            if (!IsVacuumPlanValid(vacuumPlan))
+                vacuumPlan = BuildVacuumPlan();
 
-        EItemName goalName = greatestGoal.Value.itemPrefab.ItemName;
+            if (vacuumPlan == null)
+            {
+                AbortVacuum();
+                yield break;
+            }
+
+            if (vacuumPlan.fromRack.Count == 0 || ItemSpotsManager.instance.TryReleaseItems(vacuumPlan.fromRack))
+                break;
+
+            // Rack busy (item flying in, merge, compaction): wait for it.
+            waited += Time.deltaTime;
+            if (waited > vacuumRackWaitTimeout)
+            {
+                if (replannedAfterTimeout)
+                {
+                    AbortVacuum();
+                    yield break;
+                }
+
+                replannedAfterTimeout = true;
+                waited = 0;
+                vacuumPlan = BuildVacuumPlan();
+            }
+
+            yield return null;
+        }
+
+        StartVacuumFlight(vacuumPlan);
+        vacuumPlan = null;
+    }
+
+    // Couldn't fire: give the charge back and release the board.
+    private void AbortVacuum()
+    {
+        vacuumPlan = null;
+
+        if (vacuumChargeSpent)
+        {
+            vacuumPUCount++;
+            SaveData();
+            UpdateVacuumVisuals();
+        }
+
+        vacuumChargeSpent = false;
+        isVacuumBusy = false;
+        InputManager.Unlock();
+    }
+
+    private void StartVacuumFlight(VacuumPlan plan)
+    {
+        List<Item> itemsToCollect = new List<Item>();
+
+        // Rack items sit shrunk under their spot: bring them back into the level.
+        for (int i = 0; i < plan.fromRack.Count; i++)
+        {
+            Item item = plan.fromRack[i];
+            LeanTween.cancel(item.gameObject);
+            item.transform.SetParent(LevelManager.instance.ItemParent, true);
+            item.DisablePhysics();
+            item.DisableShadows();
+            itemsToCollect.Add(item);
+        }
+
+        for (int i = 0; i < plan.fromBoard.Count; i++)
+        {
+            plan.fromBoard[i].DisablePhysics();
+            itemsToCollect.Add(plan.fromBoard[i]);
+        }
+
+        vacuumCounter = 0;
+        vacuumItemsToCollect = itemsToCollect.Count;
+
+        float topOfPile = GetTopOfPile();
+
+        // TODO: vacuum start sound once there is an audio system.
+        for (int i = 0; i < itemsToCollect.Count; i++)
+        {
+            bool fromRack = i < plan.fromRack.Count;
+            FlyToVacuum(itemsToCollect[i], fromRack, i * vacuumStagger, topOfPile);
+        }
+
+        // Only board items count: rack items were counted when they entered the rack.
+        for (int i = 0; i < plan.fromBoard.Count; i++)
+            itemPickedUp?.Invoke(plan.fromBoard[i]);
+
+        // Flying items are kinematic with colliders off, so taps can come back.
+        InputManager.Unlock();
+    }
+
+    // Type: the right-most rack item whose goal is still open, otherwise a
+    // random open goal. Then every rack copy of it, topped up from the board
+    // to exactly 3. Null when that is not possible: never collect fewer than 3.
+    private VacuumPlan BuildVacuumPlan()
+    {
+        ItemLevelData[] goals = GoalManager.instance.Goals;
+        EItemName? type = null;
+
+        foreach (Item rackItem in ItemSpotsManager.instance.RackItemsRightToLeft())
+        {
+            if (IsOpenGoal(goals, rackItem.ItemName))
+            {
+                type = rackItem.ItemName;
+                break;
+            }
+        }
+
+        if (type == null)
+        {
+            List<EItemName> openGoals = new List<EItemName>();
+            for (int i = 0; i < goals.Length; i++)
+                if (goals[i].amount > 0)
+                    openGoals.Add(goals[i].itemPrefab.ItemName);
+
+            if (openGoals.Count <= 0)
+                return null;
+
+            type = openGoals[UnityEngine.Random.Range(0, openGoals.Count)];
+        }
+
+        VacuumPlan plan = new VacuumPlan { type = type.Value };
+
+        foreach (Item rackItem in ItemSpotsManager.instance.RackItemsRightToLeft())
+            if (rackItem.ItemName == plan.type)
+                plan.fromRack.Add(rackItem);
+
+        int needed = 3 - plan.fromRack.Count;
+        Item[] items = LevelManager.instance.Items;
+
+        for (int i = 0; i < items.Length && plan.fromBoard.Count < needed; i++)
+        {
+            if (IsFreeBoardItem(items[i]) && items[i].ItemName == plan.type)
+                plan.fromBoard.Add(items[i]);
+        }
+
+        if (plan.fromBoard.Count < needed)
+            return null;
+
+        return plan;
+    }
+
+    private bool IsVacuumPlanValid(VacuumPlan plan)
+    {
+        if (plan == null)
+            return false;
+
+        List<Item> rackItems = new List<Item>(ItemSpotsManager.instance.RackItemsRightToLeft());
+
+        for (int i = 0; i < plan.fromRack.Count; i++)
+            if (plan.fromRack[i] == null || !rackItems.Contains(plan.fromRack[i]))
+                return false;
+
+        for (int i = 0; i < plan.fromBoard.Count; i++)
+            if (!IsFreeBoardItem(plan.fromBoard[i]))
+                return false;
+
+        return true;
+    }
+
+    private static bool IsOpenGoal(ItemLevelData[] goals, EItemName type)
+    {
+        for (int i = 0; i < goals.Length; i++)
+            if (goals[i].itemPrefab.ItemName == type)
+                return goals[i].amount > 0;
+
+        return false;
+    }
+
+    // On the board, not in the rack and not mid-flight.
+    private static bool IsFreeBoardItem(Item item)
+        => item != null && item.Spot == null && item.IsPhysicsEnabled;
+
+    private void FlyToVacuum(Item item, bool fromRack, float delay, float topOfPile)
+    {
+        Vector3 start = item.transform.position;
+        Vector3 target = vacuumEndPosition.position;
+        Vector3 approach = target + Vector3.forward * vacuumApproachDistance;
+
+        Vector3 ctrl = fromRack
+            ? new Vector3(Mathf.MoveTowards(start.x, target.x, vacuumRackCtrlMaxX), start.y, start.z + vacuumRackCtrlZ)
+            : new Vector3(Mathf.MoveTowards(start.x, target.x, vacuumBoardCtrlMaxX), topOfPile + vacuumBoardCtrlLift, start.z + vacuumBoardCtrlZ);
+
+        // Sample the curve and its cumulative length, so it can be walked at constant speed.
+        int count = Mathf.Max(2, vacuumPathSamples);
+        Vector3[] points = new Vector3[count];
+        float[] lengths = new float[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            points[i] = CubicBezier(start, ctrl, approach, target, i / (float)(count - 1));
+            lengths[i] = i == 0 ? 0 : lengths[i - 1] + Vector3.Distance(points[i - 1], points[i]);
+        }
+
+        float totalLength = lengths[count - 1];
+        float duration = Mathf.Max(.1f, totalLength * (fromRack ? vacuumRackSecondsPerMetre : vacuumBoardSecondsPerMetre));
+
+        LeanTween.value(item.gameObject, 0f, 1f, duration)
+            .setDelay(delay)
+            .setEase(LeanTweenType.easeInSine)
+            .setOnUpdate((float k) => item.transform.position = SamplePath(points, lengths, k * totalLength))
+            .setOnComplete(() => ItemReachedVacuum(item));
+
+        // Swell, settle back, then shrink into the nozzle in the last 0.05s.
+        Vector3 baseScale = item.transform.localScale;
+        float body = duration - .05f;
+
+        LeanTween.scale(item.gameObject, baseScale * vacuumSwellScale, body * .25f)
+            .setDelay(delay)
+            .setEase(LeanTweenType.easeInSine);
+        LeanTween.scale(item.gameObject, baseScale, body * .65f)
+            .setDelay(delay + body * .25f)
+            .setEase(LeanTweenType.easeOutSine);
+        LeanTween.scale(item.gameObject, baseScale * vacuumArrivalScale, .05f)
+            .setDelay(delay + body);
+
+        // TODO: per-item arrival sound ~0.13s before duration, once there is an audio system.
+    }
+
+    private static Vector3 CubicBezier(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t)
+    {
+        float u = 1 - t;
+        return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
+    }
+
+    private static Vector3 SamplePath(Vector3[] points, float[] lengths, float distance)
+    {
+        for (int i = 1; i < points.Length; i++)
+        {
+            if (distance <= lengths[i])
+            {
+                float segment = lengths[i] - lengths[i - 1];
+                float t = segment > 0 ? (distance - lengths[i - 1]) / segment : 0;
+                return Vector3.Lerp(points[i - 1], points[i], t);
+            }
+        }
+
+        return points[points.Length - 1];
+    }
+
+    // Highest point of the items lying on the board.
+    private float GetTopOfPile()
+    {
+        float top = LevelManager.instance.ItemParent.position.y;
         Item[] items = LevelManager.instance.Items;
 
         for (int i = 0; i < items.Length; i++)
         {
-            if (items[i] == null)
-                continue;
-            if (items[i].Spot != null)
-                continue;
-            if (items[i].ItemName != goalName)
-                continue;
-            // Mid-flight (e.g. being returned by Spring): leave it alone.
-            if (!items[i].IsPhysicsEnabled)
+            if (!IsFreeBoardItem(items[i]))
                 continue;
 
-            targets.Add(items[i]);
-
-            if (targets.Count >= 3)
-                break;
+            Collider c = items[i].GetComponentInChildren<Collider>();
+            if (c != null)
+                top = Mathf.Max(top, c.bounds.max.y);
         }
 
-        return targets;
+        return top;
     }
 
     private void ItemReachedVacuum(Item item)
@@ -275,28 +513,6 @@ public class PowerUpManager : MonoBehaviour
          Destroy(item.gameObject);
     }
 
-    public ItemLevelData? GetGreatestGoal(ItemLevelData[] goals) 
-    {
-        int max = 0;
-        int goalIdx = -1;
-
-        for (int i = 0; i < goals.Length; i++)
-        {
-            if (goals[i].amount <= 0)
-                continue;
-
-            if (goals[i].amount > max)
-            {
-                max = goals[i].amount;
-                goalIdx = i;
-            }
-        }
-        
-        if(goalIdx <= -1)
-            return null; 
-        
-        return goals[goalIdx]; 
-    }
     private void UpdateVacuumVisuals()
     {
         if (vacuum == null)
@@ -368,13 +584,13 @@ public class PowerUpManager : MonoBehaviour
         if (isSpringBusy || isFanBusy) return false;
 
         isSpringBusy = true;
-        InputManager.IsLocked = true;
+        InputManager.Lock();
 
         Item itemToRelease = ItemSpotsManager.instance.ReleaseLastItemOnRack();
 
         if (itemToRelease == null)
         {
-            InputManager.IsLocked = false;
+            InputManager.Unlock();
             isSpringBusy = false;
             return false;
         }
@@ -401,7 +617,7 @@ public class PowerUpManager : MonoBehaviour
 
         if (item == null)
         {
-            InputManager.IsLocked = false;
+            InputManager.Unlock();
             isSpringBusy = false;
             yield break;
         }
@@ -429,7 +645,7 @@ public class PowerUpManager : MonoBehaviour
         StartCoroutine(SpringBoardEnterFallback(item));
 
         // Free at launch, not at landing, so the next Spring can go right away.
-        InputManager.IsLocked = false;
+        InputManager.Unlock();
         isSpringBusy = false;
     }
 
@@ -584,7 +800,7 @@ public class PowerUpManager : MonoBehaviour
     private System.Collections.IEnumerator FanSequence()
     {
         isFanBusy = true;
-        InputManager.IsLocked = true;
+        InputManager.Lock();
 
         float windStart = fanWindStartTime / fanSpeedMultiplier;
         float throwTime = fanThrowTime / fanSpeedMultiplier;
@@ -616,7 +832,7 @@ public class PowerUpManager : MonoBehaviour
         yield return new WaitForSeconds(Mathf.Max(0, fanEndTime - windStop));
 
         SetItemCollisions(true);
-        InputManager.IsLocked = false;
+        InputManager.Unlock();
         isFanBusy = false;
     }
 
@@ -628,7 +844,7 @@ public class PowerUpManager : MonoBehaviour
         Vector3 force = new Vector3(Mathf.Cos(angle) * fanThrowSideForce, up, Mathf.Sin(angle) * fanThrowSideForce);
         Vector3 torque = new Vector3(RandomTorqueAxis(), RandomTorqueAxis(), RandomTorqueAxis());
 
-        // ForceMode.Force applied once, as in the original: it acts for one
+        // ForceMode.Force applied once: it acts for one
         // physics step, i.e. a velocity change of force * fixedDeltaTime / mass.
         rb.AddForce(force * fanForceScale, ForceMode.Force);
         rb.AddTorque(torque * fanForceScale, ForceMode.Force);

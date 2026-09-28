@@ -361,6 +361,37 @@ public class ItemSpotsManager : MonoBehaviour
         return item;
     }
 
+    // Rack items from the right-most slot to the left-most.
+    public IEnumerable<Item> RackItemsRightToLeft()
+    {
+        for (int i = spots.Length - 1; i >= 0; i--)
+        {
+            if (!spots[i].IsEmpty())
+                yield return spots[i].Item;
+        }
+    }
+
+    // Takes the given rack items out (e.g. for the Vacuum) and compacts the
+    // rack. Returns false while the rack is busy; the caller retries later.
+    // No itemPickedUp: these items were counted when they entered the rack.
+    public bool TryReleaseItems(List<Item> items)
+    {
+        if (isBusy)
+            return false;
+
+        for (int i = 0; i < items.Count; i++)
+        {
+            RemoveItemFromMergeData(items[i]);
+            items[i].Spot.Clear();
+            items[i].UnassignSpot();
+        }
+
+        isBusy = true;
+        MoveAllItemsToLeft(() => isBusy = false);
+
+        return true;
+    }
+
     // The rack is always compacted to the left, so this is the rightmost item.
     private ItemSpot GetLastOccupiedSpot()
     {
