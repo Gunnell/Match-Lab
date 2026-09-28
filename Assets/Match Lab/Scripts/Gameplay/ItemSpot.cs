@@ -13,12 +13,19 @@ public class ItemSpot : MonoBehaviour
     [SerializeField] private float bounceAmplitude = .02f;
     [Tooltip("Bounces weaker than this are skipped.")]
     [SerializeField] private float minBounceStrength = .15f;
+    [Tooltip("Size of the merge jump (slot dips as its item leaves for a merge), about 1.44x the landing bounce.")]
+    [SerializeField] private float jumpAmplitude = .029f;
 
     // Damped bounce: down, up, down, settle. Times are cumulative seconds;
     // offsets are fractions of the amplitude. Each step eases in-out sine.
     private static readonly float[] bounceTimes = { 0f, .05f, .133f, .25f, .383f };
     private static readonly float[] bounceY = { 0f, -1f, .366f, -.284f, 0f };
     private static readonly float[] bounceZ = { 0f, -.247f, .165f, -.123f, 0f };
+
+    // Merge jump: Y only, fixed strength. First step eases out, the rest in-out.
+    private static readonly float[] jumpTimes = { 0f, .05f, .117f, .183f, .300f };
+    private static readonly float[] jumpY = { 0f, -1f, .506f, -.277f, 0f };
+    private static readonly float[] jumpZ = { 0f, 0f, 0f, 0f, 0f };
 
     [Header(" Settings ")]
     private Item item;
@@ -107,25 +114,36 @@ public class ItemSpot : MonoBehaviour
         if (strength <= minBounceStrength)
             return;
 
+        PlayProfile(bounceTimes, bounceY, bounceZ, strength * bounceAmplitude, false);
+    }
+
+    // Slot dips as its item leaves for a merge.
+    public void PlayJump()
+        => PlayProfile(jumpTimes, jumpY, jumpZ, jumpAmplitude, true);
+
+    // Plays a keyframed offset of the item parent, cancelling any running one.
+    private void PlayProfile(float[] times, float[] ys, float[] zs, float scale, bool firstStepEaseOut)
+    {
         GameObject target = itemParent.gameObject;
         LeanTween.cancel(target);
         itemParent.localPosition = restPosition;
 
-        float scale = strength * bounceAmplitude;
-        float total = bounceTimes[bounceTimes.Length - 1];
+        float total = times[times.Length - 1];
 
         LeanTween.value(target, 0f, total, total)
             .setOnUpdate((float time) =>
             {
                 int step = 1;
-                while (step < bounceTimes.Length - 1 && time > bounceTimes[step])
+                while (step < times.Length - 1 && time > times[step])
                     step++;
 
-                float k = Mathf.InverseLerp(bounceTimes[step - 1], bounceTimes[step], time);
-                k = -(Mathf.Cos(Mathf.PI * k) - 1) * .5f; // ease in-out sine
+                float k = Mathf.InverseLerp(times[step - 1], times[step], time);
+                k = firstStepEaseOut && step == 1
+                    ? Mathf.Sin(k * Mathf.PI * .5f)          // ease out sine
+                    : -(Mathf.Cos(Mathf.PI * k) - 1) * .5f;  // ease in-out sine
 
-                float y = Mathf.Lerp(bounceY[step - 1], bounceY[step], k);
-                float z = Mathf.Lerp(bounceZ[step - 1], bounceZ[step], k);
+                float y = Mathf.Lerp(ys[step - 1], ys[step], k);
+                float z = Mathf.Lerp(zs[step - 1], zs[step], k);
                 itemParent.localPosition = restPosition + new Vector3(0, y, z) * scale;
             })
             .setOnComplete(() => itemParent.localPosition = restPosition);
