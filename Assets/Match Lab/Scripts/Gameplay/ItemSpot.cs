@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class ItemSpot : MonoBehaviour
@@ -10,11 +11,25 @@ public class ItemSpot : MonoBehaviour
 
     [Header(" Landing Bounce ")]
     [Tooltip("Size of the bounce in the spot's local units, at full strength.")]
-    [SerializeField] private float bounceAmplitude = .02f;
+    [SerializeField] private float bounceAmplitude = .031f;
     [Tooltip("Bounces weaker than this are skipped.")]
     [SerializeField] private float minBounceStrength = .15f;
     [Tooltip("Size of the merge jump (slot dips as its item leaves for a merge), about 1.44x the landing bounce.")]
-    [SerializeField] private float jumpAmplitude = .029f;
+    [SerializeField] private float jumpAmplitude = .045f;
+
+    [Header(" Contact Shadow ")]
+    [Tooltip("Soft dark ellipse on the slot surface. Its alpha follows how close the nearest rack item is.")]
+    [SerializeField] private SpriteRenderer contactShadow;
+    [Tooltip("Items closer than this (world units, from the slot centre) get the full shadow.")]
+    [SerializeField] private float shadowNear = .24f;
+    [Tooltip("Fade rate past shadowNear: the shadow is gone at shadowNear + 1 / shadowFalloff.")]
+    [SerializeField] private float shadowFalloff = 2.3f;
+    [Tooltip("Only items within this sideways distance (world, along the rack) count, so a neighbour's item doesn't shade this slot.")]
+    [SerializeField] private float shadowHalfWidth = .25f;
+    [SerializeField] private float shadowMaxAlpha = .35f;
+    [Tooltip("Share of the gap closed per 60 Hz frame; gaps under shadowSnap are closed at once.")]
+    [SerializeField] private float shadowSmoothing = .125f;
+    [SerializeField] private float shadowSnap = .125f;
 
     [Header(" Shine ")]
     // A tint over the slot (blend toward a colour, 0 = the slot's own look),
@@ -43,6 +58,14 @@ public class ItemSpot : MonoBehaviour
     private Item item;
     public Item Item => item;
 
+    // The item that last left this slot (merge, Vacuum, Spring, compaction),
+    // so the shadow fades out as it moves away instead of vanishing.
+    private Item previousItem;
+    private float shadowAlpha;
+    // Every spot's current and previous item are shadow candidates for every
+    // spot, so a slot also darkens as an item slides past it.
+    private static readonly List<ItemSpot> allSpots = new List<ItemSpot>();
+
     private Vector3 restPosition;
     private float landingStrength;
     private bool landingFromBoard = true;
@@ -68,7 +91,77 @@ public class ItemSpot : MonoBehaviour
         // Items are parented here later, so at this point the only renderer is the slot's own.
         if (slotRenderer == null)
             slotRenderer = itemParent.GetComponentInChildren<Renderer>(true);
+
+        SetShadowAlpha(0);
     }
+
+    private void OnEnable() => allSpots.Add(this);
+
+    private void OnDisable() => allSpots.Remove(this);
+
+    // After the item tweens have moved things this frame.
+    private void LateUpdate()
+    {
+        if (contactShadow == null)
+            return;
+
+        float target = 0;
+        float d = NearestItemDistance();
+
+        if (d < float.MaxValue)
+        {
+            float t = Mathf.Clamp01((d - shadowNear) * shadowFalloff);
+            target = (1 - t) * (1 - t) * shadowMaxAlpha;
+        }
+
+        float gap = target - shadowAlpha;
+        if (Mathf.Abs(gap) > shadowSnap)
+            shadowAlpha += gap * (1 - Mathf.Pow(1 - shadowSmoothing, Time.deltaTime * 60f));
+        else
+            shadowAlpha = target;
+
+        SetShadowAlpha(shadowAlpha);
+    }
+
+    private float NearestItemDistance()
+    {
+        float nearest = float.MaxValue;
+
+        for (int i = 0; i < allSpots.Count; i++)
+        {
+            nearest = Mathf.Min(nearest, DistanceTo(allSpots[i].item));
+            nearest = Mathf.Min(nearest, DistanceTo(allSpots[i].previousItem));
+        }
+
+        return nearest;
+    }
+
+    // Distance from the slot centre, or MaxValue when outside this slot's lane.
+    private float DistanceTo(Item candidate)
+    {
+        if (candidate == null)
+            return float.MaxValue;
+
+        Vector3 offset = candidate.transform.position - transform.position;
+        if (Mathf.Abs(Vector3.Dot(offset, transform.right)) > shadowHalfWidth)
+            return float.MaxValue;
+
+        return offset.magnitude;
+    }
+
+    private void SetShadowAlpha(float alpha)
+    {
+        if (contactShadow == null)
+            return;
+
+        Color c = contactShadow.color;
+        c.a = alpha;
+        contactShadow.color = c;
+        contactShadow.enabled = alpha > 0;
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStatics() => allSpots.Clear();
 
     public void Populate(Item item)
     {
@@ -83,6 +176,9 @@ public class ItemSpot : MonoBehaviour
 
     public void Clear()
     {
+        if (item != null)
+            previousItem = item;
+
         item = null;
     }
 
