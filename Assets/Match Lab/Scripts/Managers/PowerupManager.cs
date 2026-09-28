@@ -10,6 +10,8 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private Transform vacuumEndPosition;
     [Tooltip("How long to wait for a busy rack before re-planning, then giving up with a refund.")]
     [SerializeField] private float vacuumRackWaitTimeout = 2f;
+    [Tooltip("On: prefer the right-most goal already in the rack, random otherwise. Off: always a random open goal.")]
+    [SerializeField] private bool vacuumPreferRackGoal = true;
     // Flight: each item follows a cubic Bezier (start, ctrl, approach, nozzle)
     // at constant speed, easing in so it speeds up into the nozzle.
     [Tooltip("The approach point sits this far from the nozzle toward the board, so items come in from the board side.")]
@@ -142,6 +144,9 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     private VacuumPlan vacuumPlan;
     // Whether the running use paid a charge (the editor button doesn't), so an abort only refunds what was spent.
     private bool vacuumChargeSpent;
+    // Board items in flight that still have to be counted for their goal on
+    // arrival (rack items were counted when they entered the rack).
+    private readonly HashSet<Item> vacuumUncounted = new HashSet<Item>();
 
     // What one Vacuum use collects: always 3 items of one goal type, the
     // rack copies first, the rest from the board.
@@ -324,6 +329,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     private void AbortVacuum()
     {
         vacuumPlan = null;
+        vacuumUncounted.Clear();
 
         if (vacuumChargeSpent)
         {
@@ -361,6 +367,11 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         vacuumCounter = 0;
         vacuumItemsToCollect = itemsToCollect.Count;
 
+        // Board items are counted one by one as they reach the vacuum.
+        vacuumUncounted.Clear();
+        for (int i = 0; i < plan.fromBoard.Count; i++)
+            vacuumUncounted.Add(plan.fromBoard[i]);
+
         float topOfPile = GetTopOfPile();
 
         // TODO: vacuum start sound once there is an audio system.
@@ -370,48 +381,62 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
             FlyToVacuum(itemsToCollect[i], fromRack, i * vacuumStagger, topOfPile);
         }
 
-        // Only board items count: rack items were counted when they entered the rack.
-        for (int i = 0; i < plan.fromBoard.Count; i++)
-            itemPickedUp?.Invoke(plan.fromBoard[i]);
-
         // Flying items are kinematic with colliders off, so taps can come back.
         InputManager.Unlock();
     }
 
-    // Type: the right-most rack item whose goal is still open, otherwise a
-    // random open goal. Then every rack copy of it, topped up from the board
-    // to exactly 3. Null when that is not possible: never collect fewer than 3.
+    // Always exactly 3 items of one open goal: every rack copy first, the rest
+    // from the board. Candidate order: with vacuumPreferRackGoal, open goals
+    // already in the rack (right-most first), then the other open goals at
+    // random; without it, all open goals at random. A goal that can't make 3
+    // right now is skipped. Null when no open goal can: never fewer than 3.
     private VacuumPlan BuildVacuumPlan()
     {
         ItemLevelData[] goals = GoalManager.instance.Goals;
-        EItemName? type = null;
+        List<EItemName> candidates = new List<EItemName>();
 
-        foreach (Item rackItem in ItemSpotsManager.instance.RackItemsRightToLeft())
+        if (vacuumPreferRackGoal)
         {
-            if (IsOpenGoal(goals, rackItem.ItemName))
-            {
-                type = rackItem.ItemName;
-                break;
-            }
+            foreach (Item rackItem in ItemSpotsManager.instance.RackItemsRightToLeft())
+                if (IsOpenGoal(goals, rackItem.ItemName) && !candidates.Contains(rackItem.ItemName))
+                    candidates.Add(rackItem.ItemName);
         }
 
-        if (type == null)
+        List<EItemName> others = new List<EItemName>();
+        for (int i = 0; i < goals.Length; i++)
         {
-            List<EItemName> openGoals = new List<EItemName>();
-            for (int i = 0; i < goals.Length; i++)
-                if (goals[i].amount > 0)
-                    openGoals.Add(goals[i].itemPrefab.ItemName);
-
-            if (openGoals.Count <= 0)
-                return null;
-
-            type = openGoals[UnityEngine.Random.Range(0, openGoals.Count)];
+            EItemName type = goals[i].itemPrefab.ItemName;
+            if (goals[i].amount > 0 && !candidates.Contains(type) && !others.Contains(type))
+                others.Add(type);
         }
 
-        VacuumPlan plan = new VacuumPlan { type = type.Value };
+        // Shuffled, so the first workable one is a uniform pick among them.
+        for (int i = others.Count - 1; i > 0; i--)
+        {
+            int j = UnityEngine.Random.Range(0, i + 1);
+            EItemName swap = others[i];
+            others[i] = others[j];
+            others[j] = swap;
+        }
+
+        candidates.AddRange(others);
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            VacuumPlan plan = TryBuildVacuumPlan(candidates[i]);
+            if (plan != null)
+                return plan;
+        }
+
+        return null;
+    }
+
+    private VacuumPlan TryBuildVacuumPlan(EItemName type)
+    {
+        VacuumPlan plan = new VacuumPlan { type = type };
 
         foreach (Item rackItem in ItemSpotsManager.instance.RackItemsRightToLeft())
-            if (rackItem.ItemName == plan.type)
+            if (rackItem.ItemName == type && plan.fromRack.Count < 3)
                 plan.fromRack.Add(rackItem);
 
         int needed = 3 - plan.fromRack.Count;
@@ -419,14 +444,11 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
 
         for (int i = 0; i < items.Length && plan.fromBoard.Count < needed; i++)
         {
-            if (IsFreeBoardItem(items[i]) && items[i].ItemName == plan.type)
+            if (IsFreeBoardItem(items[i]) && items[i].ItemName == type)
                 plan.fromBoard.Add(items[i]);
         }
 
-        if (plan.fromBoard.Count < needed)
-            return null;
-
-        return plan;
+        return plan.fromBoard.Count < needed ? null : plan;
     }
 
     private bool IsVacuumPlanValid(VacuumPlan plan)
@@ -551,6 +573,14 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
          vacuumCounter++;
          if (vacuumCounter >= vacuumItemsToCollect)
              isVacuumBusy = false;
+
+         if (item == null)
+             return;
+
+         // Counted on arrival, so the goal card ticks down one item at a time.
+         if (vacuumUncounted.Remove(item))
+             itemPickedUp?.Invoke(item);
+
          Destroy(item.gameObject);
     }
 
@@ -626,6 +656,9 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
 
         isSpringBusy = true;
         InputManager.Lock();
+
+        // The red last-space warning stops the moment the Spring is used.
+        ItemSpotsManager.instance.StopLastSpaceWarning();
 
         // The slot the item leaves, for the flash (the release clears it).
         ItemSpot fromSpot = null;
@@ -1119,7 +1152,11 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     public void GameStateChangedCallback(EGameState gameState)
     {
         if (gameState == EGameState.LEVELCOMPLETE || gameState == EGameState.GAMEOVER)
+        {
             ResetFreeze();
+            // Items still flying into the vacuum are no longer counted.
+            vacuumUncounted.Clear();
+        }
     }
 
     private void UpdateFreezeVisuals()

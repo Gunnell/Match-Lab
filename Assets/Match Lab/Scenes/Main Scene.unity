@@ -7515,6 +7515,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::GoalManager
   goalCardParent: {fileID: 2032196306}
   goalCardPrefab: {fileID: 7843177916934245078, guid: 0bf8916806a7d424a915f491de860f69, type: 3}
+  cardSpacing: 20
+  paddingLeft: -16
+  appearStagger: 0.133
+  appearDuration: 0.433
+  slideSecondsPerSlot: 0.147
+  maxGoals: 6
 --- !u!1 &668602196
 GameObject:
   m_ObjectHideFlags: 0
@@ -19859,6 +19865,9 @@ MonoBehaviour:
   sameRowSlideMultiplier: 1.5
   slideHopHeight: 0.12
   bounceStrengthPerUnit: 0.2
+  warningColor: {r: 1, g: 0, b: 0.047, a: 1}
+  warningHalfPeriod: 0.5
+  warningStopFade: 0.25
 --- !u!4 &1475206984
 Transform:
   m_ObjectHideFlags: 0
