@@ -4812,6 +4812,19 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PowerUpManager
   vacuum: {fileID: 601211589}
   vacuumEndPosition: {fileID: 621428900}
+  vacuumRackWaitTimeout: 2
+  vacuumApproachDistance: 1.1
+  vacuumBoardCtrlMaxX: 2.1
+  vacuumBoardCtrlLift: 0.6
+  vacuumBoardCtrlZ: 1.25
+  vacuumRackCtrlMaxX: 1.6
+  vacuumRackCtrlZ: 2.7
+  vacuumBoardSecondsPerMetre: 0.09
+  vacuumRackSecondsPerMetre: 0.12
+  vacuumStagger: 0.35
+  vacuumPathSamples: 25
+  vacuumSwellScale: 1.42
+  vacuumArrivalScale: 0.45
   spring: {fileID: 1691047894}
   springSpeedMultiplier: 1
   springLaunchPoint: {fileID: 1455264551}

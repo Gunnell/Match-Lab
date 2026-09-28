@@ -1,7 +1,7 @@
 using UnityEngine;
 
 /// <summary>
-/// Clickable Fan powerup (Match Factory's Shuffle booster). The shuffle
+/// Clickable Fan powerup. The shuffle
 /// itself lives in PowerUpManager; this animates the fan: a pop on
 /// activation, the rotor spinning for the length of the shuffle, and an
 /// optional wind particle effect.

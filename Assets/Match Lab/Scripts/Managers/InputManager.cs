@@ -5,8 +5,13 @@ public class InputManager : MonoBehaviour
     public static Action<Item> itemClicked;
     public static Action<Powerup> powerupClicked;
 
-    // Set while a powerup needs the board to itself (e.g. the Fan shuffle).
-    public static bool IsLocked;
+    // Held while a powerup needs the board to itself. A counter, so one
+    // powerup finishing never releases another powerup's lock.
+    private static int lockCount;
+    public static bool IsLocked => lockCount > 0;
+
+    public static void Lock() => lockCount++;
+    public static void Unlock() => lockCount = Mathf.Max(0, lockCount - 1);
 
 
     [Header(" Settings ")]
@@ -16,7 +21,7 @@ public class InputManager : MonoBehaviour
     private void Awake()
     {
         // Static, so it would survive a scene reload mid-lock.
-        IsLocked = false;
+        lockCount = 0;
     }
 
     // Update is called once per frame
