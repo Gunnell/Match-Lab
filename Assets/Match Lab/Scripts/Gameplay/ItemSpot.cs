@@ -5,6 +5,8 @@ public class ItemSpot : MonoBehaviour
     [Header(" Elements ")] 
     [SerializeField] private Animator animator;
     [SerializeField] private Transform itemParent;
+    [Tooltip("The slot's own mesh, tinted by PlayFlash. Found under the item parent if empty.")]
+    [SerializeField] private Renderer slotRenderer;
 
     [Header(" Landing Bounce ")]
     [Tooltip("Size of the bounce in the spot's local units, at full strength.")]
@@ -25,6 +27,10 @@ public class ItemSpot : MonoBehaviour
     private Vector3 restPosition;
     private float landingStrength;
 
+    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorId = Shader.PropertyToID("_Color");
+    private MaterialPropertyBlock flashBlock;
+
     private void Awake()
     {
         // The Bump clip's Animator (write defaults on) would overwrite the
@@ -33,6 +39,10 @@ public class ItemSpot : MonoBehaviour
             animator.enabled = false;
 
         restPosition = itemParent.localPosition;
+
+        // Items are parented here later, so at this point the only renderer is the slot's own.
+        if (slotRenderer == null)
+            slotRenderer = itemParent.GetComponentInChildren<Renderer>(true);
     }
 
     public void Populate(Item item)
@@ -49,6 +59,40 @@ public class ItemSpot : MonoBehaviour
     public void Clear()
     {
         item = null;
+    }
+
+    // Tints the slot to the colour and back, through a property block so no
+    // material copy is made. Restores the material's own colour exactly.
+    public void PlayFlash(Color color, float inTime, float outTime)
+    {
+        if (slotRenderer == null)
+            return;
+
+        Material material = slotRenderer.sharedMaterial;
+        int colorId = material.HasProperty(BaseColorId) ? BaseColorId : ColorId;
+        Color baseColor = material.GetColor(colorId);
+        GameObject target = slotRenderer.gameObject;
+
+        if (flashBlock == null)
+            flashBlock = new MaterialPropertyBlock();
+
+        LeanTween.cancel(target);
+
+        LeanTween.value(target, 0f, 1f, inTime)
+            .setEase(LeanTweenType.easeOutSine)
+            .setOnUpdate((float k) => SetTint(colorId, Color.Lerp(baseColor, color, k)));
+
+        LeanTween.value(target, 1f, 0f, outTime)
+            .setDelay(inTime)
+            .setEase(LeanTweenType.easeInSine)
+            .setOnUpdate((float k) => SetTint(colorId, Color.Lerp(baseColor, color, k)))
+            .setOnComplete(() => slotRenderer.SetPropertyBlock(null));
+    }
+
+    private void SetTint(int colorId, Color color)
+    {
+        flashBlock.SetColor(colorId, color);
+        slotRenderer.SetPropertyBlock(flashBlock);
     }
 
     // How hard the next landing hits, 0..1 (set when an item is sent here).
