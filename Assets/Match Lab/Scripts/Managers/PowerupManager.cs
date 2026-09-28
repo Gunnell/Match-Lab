@@ -72,6 +72,15 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private float springDampingDuration = 1f;
     [Tooltip("Stop ignoring the throw collider after this long even if the item never entered the board.")]
     [SerializeField] private float springBoardEnterFallback = 1.5f;
+    // Effects covering the cut between the item vanishing from the rack and
+    // appearing at the Spring. Timings are divided by springSpeedMultiplier.
+    [SerializeField] private Color springSlotFlashColor = new Color(.455f, 0f, .576f);
+    [SerializeField] private float springSlotFlashIn = .133f;
+    [SerializeField] private float springSlotFlashOut = .133f;
+    [Tooltip("Burst where the item vanished. Should destroy itself when done.")]
+    [SerializeField] private ParticleSystem springSlotBurstPrefab;
+    [Tooltip("Burst position relative to the slot (world; +Y toward the camera, +Z up on screen).")]
+    [SerializeField] private Vector3 springSlotBurstOffset = new Vector3(0, .28f, .18f);
 
     [Header(" Fan Elements ")]
     [SerializeField] private Fan fan;
@@ -618,6 +627,14 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         isSpringBusy = true;
         InputManager.Lock();
 
+        // The slot the item leaves, for the flash (the release clears it).
+        ItemSpot fromSpot = null;
+        foreach (Item rackItem in ItemSpotsManager.instance.RackItemsRightToLeft())
+        {
+            fromSpot = rackItem.Spot;
+            break;
+        }
+
         Item itemToRelease = ItemSpotsManager.instance.ReleaseLastItemOnRack();
 
         if (itemToRelease == null)
@@ -630,25 +647,43 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         // Not itemPickedUp: the goal count goes back up instead.
         itemBackToGame?.Invoke(itemToRelease);
 
-        StartCoroutine(SpringThrowSequence(itemToRelease));
+        StartCoroutine(SpringThrowSequence(itemToRelease, fromSpot));
 
         return true;
     }
 
-    private System.Collections.IEnumerator SpringThrowSequence(Item item)
+    private System.Collections.IEnumerator SpringThrowSequence(Item item, ItemSpot fromSpot)
     {
+        Vector3 burstBase = fromSpot != null ? fromSpot.transform.position : item.transform.position;
+        float launchDelay = springLaunchDelay / springSpeedMultiplier;
+
         // Vanish from the rack at once; the rack is already compacting.
         LeanTween.cancel(item.gameObject);
         item.transform.parent = LevelManager.instance.ItemParent;
         item.Hide();
         item.DisableShadows();
 
-        // TODO: Spring button animation / particle hook (Spring.cs has none yet).
+        // The effects cover the cut: slot flash, burst where the item was,
+        // and the Spring charging.
+        if (fromSpot != null)
+            fromSpot.PlayFlash(springSlotFlashColor, springSlotFlashIn / springSpeedMultiplier, springSlotFlashOut / springSpeedMultiplier);
 
-        yield return new WaitForSeconds(springLaunchDelay / springSpeedMultiplier);
+        if (springSlotBurstPrefab != null)
+            Instantiate(springSlotBurstPrefab, burstBase + springSlotBurstOffset, Quaternion.identity).Play();
 
-        if (item == null)
+        if (spring != null)
+            spring.PlayLoad(launchDelay);
+
+        // TODO: slot sound / haptic once there is an audio system.
+
+        yield return new WaitForSeconds(launchDelay);
+
+        // Item gone or level over during the wait: release everything.
+        if (item == null || !GameManager.instance.IsGame())
         {
+            if (spring != null)
+                spring.StopLoad();
+
             InputManager.Unlock();
             isSpringBusy = false;
             yield break;
@@ -657,6 +692,14 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         Transform launchPoint = springLaunchPoint != null ? springLaunchPoint : spring != null ? spring.transform : null;
         if (launchPoint != null)
             item.transform.position = launchPoint.position;
+
+        if (spring != null)
+        {
+            spring.PlayRelease();
+            spring.PlayLaunchFx();
+        }
+
+        // TODO: launch sound + haptic once there is an audio system.
 
         item.Show();
         item.EnablePhysics();
