@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using NaughtyAttributes;
 using UnityEngine;
 
-public class PowerUpManager : MonoBehaviour
+public class PowerUpManager : MonoBehaviour, IGameStateListener
 {
     [Header(" Vacuum Elements")]
     [SerializeField] private Vacuum vacuum;
@@ -88,6 +88,26 @@ public class PowerUpManager : MonoBehaviour
     [Tooltip("Scales the throw forces to this world. At 1 an item (mass 1) is thrown ~10 m up, "
         + "past the camera; .28 lands it inside the 0.8s window before collisions return.")]
     [SerializeField] private float fanForceScale = .28f;
+
+    [Header(" Freeze Gun Elements ")]
+    [SerializeField] private FreezeGun freezeGun;
+    [Tooltip("What the gun fires at the timer. A placeholder sphere is made if left empty.")]
+    [SerializeField] private GameObject freezeProjectilePrefab;
+    [Tooltip("The timer the shot flies to (Timer Container).")]
+    [SerializeField] private RectTransform freezeTarget;
+    [SerializeField] private float freezeDuration = 10f;
+    [Tooltip("Tap to shot. The timer is paused meanwhile.")]
+    [SerializeField] private float freezeFireDelay = .8f;
+    [Tooltip("Divides the fire delay.")]
+    [SerializeField] private float freezeSpeedMultiplier = 1f;
+    [Tooltip("Constant speed flight: seconds per unit of distance.")]
+    [SerializeField] private float freezeProjectileSecondsPerUnit = .035f;
+    [Tooltip("The shot ends this far in front of the camera, under the timer on screen, so it flies over the pile instead of under it.")]
+    [SerializeField] private float freezeTargetDepth = 4f;
+    [SerializeField] private float freezeProjectileRecycleDelay = .5f;
+    [SerializeField] private FreezeOverlay freezeOverlay;
+    [Tooltip("Burst played where the shot hits the timer.")]
+    [SerializeField] private ParticleSystem freezeHitParticles;
     [Header(" Actions ")] 
     public static Action<Item> itemPickedUp;
     public static Action<Item> itemBackToGame;
@@ -97,6 +117,12 @@ public class PowerUpManager : MonoBehaviour
     private bool isVacuumBusy;
     private bool isSpringBusy;
     private bool isFanBusy;
+    // Only between tap and shot; a new use is allowed once the gun has fired, even mid-freeze.
+    private bool isFreezeBusy;
+    // Shots tapped but not landed yet: the timer stays paused while any are pending.
+    private int freezeShotsPending;
+    private readonly List<GameObject> freezeProjectiles = new List<GameObject>();
+    private readonly List<Coroutine> freezeRoutines = new List<Coroutine>();
     // Spring tapped while the rack was animating; fired once the rack is free.
     private bool springQueued;
     private int vacuumItemsToCollect;
@@ -122,6 +148,7 @@ public class PowerUpManager : MonoBehaviour
     private int vacuumPUCount;
     private int springPUCount;
     private int fanPUCount;
+    private int freezePUCount;
 
     private void Awake()
     {
@@ -158,6 +185,11 @@ public class PowerUpManager : MonoBehaviour
             case EPowerupType.Fan:
                 HandleFanClicked();
                 UpdateFanVisuals();
+                break;
+
+            case EPowerupType.FreezeGun:
+                HandleFreezeClicked();
+                UpdateFreezeVisuals();
                 break;
         }
 
@@ -890,15 +922,183 @@ public class PowerUpManager : MonoBehaviour
     }
 
     #endregion
+
+    #region Freeze Gun Powerup
+
+    private void HandleFreezeClicked()
+    {
+        if (isFreezeBusy)
+            return;
+
+        if (freezePUCount <= 0)
+        {
+            // TODO: rewarded video. Same free refill placeholder as the others.
+            freezePUCount = 3;
+            SaveData();
+            return;
+        }
+
+        if (!FreezePowerup())
+            return;
+
+        freezePUCount--;
+        SaveData();
+    }
+
+    // Tap: the timer stops at once. The gun fires after the delay, and when
+    // the shot lands the freeze starts (or stacks). No input lock: the player
+    // keeps playing the whole time.
+    [Button]
+    public bool FreezePowerup()
+    {
+        if (isFreezeBusy) return false;
+
+        TimerManager timer = TimerManager.instance;
+        if (!GameManager.instance.IsGame() || timer == null || !timer.IsRunning)
+            return false;
+
+        isFreezeBusy = true;
+        freezeShotsPending++;
+        timer.SetPaused(true);
+
+        if (freezeGun != null)
+            freezeGun.Play();
+
+        // TODO: gun sound / haptic once there is an audio system.
+        freezeRoutines.Add(StartCoroutine(FreezeFireSequence()));
+        return true;
+    }
+
+    private System.Collections.IEnumerator FreezeFireSequence()
+    {
+        yield return new WaitForSeconds(freezeFireDelay / freezeSpeedMultiplier);
+
+        isFreezeBusy = false;
+
+        if (!GameManager.instance.IsGame())
+            yield break;
+
+        Vector3 start = freezeGun != null ? freezeGun.Muzzle.position : transform.position;
+        GameObject projectile = SpawnFreezeProjectile(start);
+        freezeProjectiles.Add(projectile);
+
+        float duration = Mathf.Max(.05f, Vector3.Distance(start, GetFreezeTargetPoint()) * freezeProjectileSecondsPerUnit);
+
+        // Target recomputed every frame in case the camera moves.
+        LeanTween.value(projectile, 0f, 1f, duration)
+            .setOnUpdate((float k) => projectile.transform.position = Vector3.Lerp(start, GetFreezeTargetPoint(), k))
+            .setOnComplete(() => OnFreezeShotLanded(projectile));
+    }
+
+    private void OnFreezeShotLanded(GameObject projectile)
+    {
+        freezeShotsPending = Mathf.Max(0, freezeShotsPending - 1);
+
+        LeanTween.scale(projectile, Vector3.zero, .15f);
+        Destroy(projectile, freezeProjectileRecycleDelay);
+        freezeProjectiles.Remove(projectile);
+
+        TimerManager timer = TimerManager.instance;
+        if (!GameManager.instance.IsGame() || timer == null || !timer.IsRunning)
+            return;
+
+        timer.Freeze(freezeDuration, OnFreezeEnded);
+        timer.SetPaused(freezeShotsPending > 0);
+
+        if (freezeOverlay != null)
+            freezeOverlay.FadeIn();
+
+        if (freezeHitParticles != null)
+            Instantiate(freezeHitParticles, projectile.transform.position, Quaternion.identity, transform).Play();
+        // TODO: hit sound / haptic once there is an audio system.
+    }
+
+    private void OnFreezeEnded()
+    {
+        if (freezeOverlay != null)
+            freezeOverlay.FadeOut();
+    }
+
+    // The point in front of the camera that sits under the timer on screen.
+    private Vector3 GetFreezeTargetPoint()
+    {
+        Camera cam = Camera.main;
+
+        if (freezeTarget == null || cam == null)
+            return transform.position;
+
+        // Overlay canvas: the RectTransform's position is already in screen space.
+        Vector2 screen = RectTransformUtility.WorldToScreenPoint(null, freezeTarget.position);
+        return cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, freezeTargetDepth));
+    }
+
+    private GameObject SpawnFreezeProjectile(Vector3 position)
+    {
+        if (freezeProjectilePrefab != null)
+            return Instantiate(freezeProjectilePrefab, position, Quaternion.identity);
+
+        // Placeholder: a small icy sphere.
+        GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        Destroy(sphere.GetComponent<Collider>());
+        sphere.name = "Freeze Projectile (placeholder)";
+        sphere.transform.position = position;
+        sphere.transform.localScale = Vector3.one * .25f;
+        sphere.GetComponent<Renderer>().material.color = new Color(.6f, .9f, 1f);
+        return sphere;
+    }
+
+    // Win or lose mid-sequence: nothing may stay paused, flying or visible.
+    private void ResetFreeze()
+    {
+        for (int i = 0; i < freezeRoutines.Count; i++)
+            if (freezeRoutines[i] != null)
+                StopCoroutine(freezeRoutines[i]);
+
+        freezeRoutines.Clear();
+
+        for (int i = 0; i < freezeProjectiles.Count; i++)
+        {
+            if (freezeProjectiles[i] == null)
+                continue;
+
+            LeanTween.cancel(freezeProjectiles[i]);
+            Destroy(freezeProjectiles[i]);
+        }
+
+        freezeProjectiles.Clear();
+        freezeShotsPending = 0;
+        isFreezeBusy = false;
+
+        if (freezeOverlay != null)
+            freezeOverlay.ResetOverlay();
+    }
+
+    public void GameStateChangedCallback(EGameState gameState)
+    {
+        if (gameState == EGameState.LEVELCOMPLETE || gameState == EGameState.GAMEOVER)
+            ResetFreeze();
+    }
+
+    private void UpdateFreezeVisuals()
+    {
+        if (freezeGun == null)
+            return;
+
+        freezeGun.UpdateVisuals(freezePUCount);
+    }
+
+    #endregion
     
     private void LoadData()
     {
         vacuumPUCount = PlayerPrefs.GetInt("VacuumPUCount", initialPUCount);
         springPUCount = PlayerPrefs.GetInt("SpringPUCount", initialPUCount);
         fanPUCount = PlayerPrefs.GetInt("FanPUCount", initialPUCount);
+        freezePUCount = PlayerPrefs.GetInt("FreezePUCount", initialPUCount);
         UpdateVacuumVisuals();
         UpdateSpringVisuals();
         UpdateFanVisuals();
+        UpdateFreezeVisuals();
     }
     
     private void SaveData()
@@ -906,6 +1106,7 @@ public class PowerUpManager : MonoBehaviour
         PlayerPrefs.SetInt("VacuumPUCount", vacuumPUCount);
         PlayerPrefs.SetInt("SpringPUCount", springPUCount);
         PlayerPrefs.SetInt("FanPUCount", fanPUCount);
+        PlayerPrefs.SetInt("FreezePUCount", freezePUCount);
     }
 
 }
