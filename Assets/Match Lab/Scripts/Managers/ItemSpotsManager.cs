@@ -2,7 +2,7 @@ using UnityEngine;
 using System;
 using System.Collections.Generic;
 
-public class ItemSpotsManager : MonoBehaviour
+public class ItemSpotsManager : MonoBehaviour, IGameStateListener
 {
     public static ItemSpotsManager instance;
      
@@ -45,6 +45,14 @@ public class ItemSpotsManager : MonoBehaviour
     [Header(" Landing ")]
     [Tooltip("Bounce strength per unit of depth the item travelled (capped at 1). Weaker than 0.15 = no bounce.")]
     [SerializeField] private float bounceStrengthPerUnit = .2f;
+
+    [Header(" Last Space Warning ")]
+    // With 6 items and no match coming, the empty last slot pulses red.
+    [SerializeField] private Color warningColor = new Color(1f, 0f, .047f);
+    [Tooltip("Half a pulse (0 to full or back), seconds.")]
+    [SerializeField] private float warningHalfPeriod = .5f;
+    [SerializeField] private float warningStopFade = .25f;
+    private bool isMergeRunning;
 
     // One tap is buffered while the rack is animating, so fast taps aren't
     // dropped. It is processed (and only then counted) once the rack is free.
@@ -94,6 +102,9 @@ public class ItemSpotsManager : MonoBehaviour
         itemPickedUp?.Invoke(item);
 
         HandleItemClicked(item);
+
+        // The item now holds a slot, so the rack count changed.
+        UpdateLastSpaceWarning();
             
 
     }  
@@ -206,6 +217,10 @@ public class ItemSpotsManager : MonoBehaviour
         List<Item> items = itemMergeData.items;
         itemMergeDataDictionary.Remove(itemMergeData.itemName);
 
+        // A match is happening: no warning.
+        isMergeRunning = true;
+        UpdateLastSpaceWarning();
+
         for(int i = 0; i < items.Count; i++)
             items[i].Spot.Clear();
 
@@ -261,6 +276,8 @@ public class ItemSpotsManager : MonoBehaviour
 
     private void OnMergeCompleted()
     {
+        isMergeRunning = false;
+
         if (itemMergeDataDictionary.Count <= 0)
             SetNotBusy();
         else
@@ -281,13 +298,62 @@ public class ItemSpotsManager : MonoBehaviour
         Item item = bufferedItem;
         bufferedItem = null;
 
-        if (item == null || item.Spot != null || !item.IsPhysicsEnabled || item.IsBeingThrown)
+        bool bufferValid = item != null && item.Spot == null && item.IsPhysicsEnabled && !item.IsBeingThrown
+            && GameManager.instance.IsGame();
+
+        if (bufferValid)
+            OnItemClicked(item);
+
+        // The rack has settled (or a buffered tap just refilled it).
+        UpdateLastSpaceWarning();
+    }
+
+    // Pulse the empty last slot when the rack holds 6 items and no match is
+    // coming. Starts only once the rack has settled; stops as soon as the
+    // condition no longer holds.
+    private void UpdateLastSpaceWarning()
+    {
+        if (spots == null || spots.Length == 0)
             return;
 
-        if (!GameManager.instance.IsGame())
-            return;
+        ItemSpot lastSpot = spots[spots.Length - 1];
+        int occupied = 0;
+        for (int i = 0; i < spots.Length; i++)
+            if (!spots[i].IsEmpty())
+                occupied++;
 
-        OnItemClicked(item);
+        bool danger = occupied == spots.Length - 1 && !IsMatchPending() && GameManager.instance.IsGame();
+
+        if (!danger)
+            lastSpot.StopWarning(warningStopFade);
+        else if (!isBusy && !lastSpot.IsWarning)
+            lastSpot.StartWarning(warningColor, warningHalfPeriod);
+    }
+
+    // Used by the Spring before it takes an item.
+    public void StopLastSpaceWarning()
+    {
+        if (spots != null && spots.Length > 0)
+            spots[spots.Length - 1].StopWarning(warningStopFade);
+    }
+
+    // A group of 3 about to merge, or a merge still animating.
+    private bool IsMatchPending()
+    {
+        if (isMergeRunning)
+            return true;
+
+        foreach (ItemMergeData data in itemMergeDataDictionary.Values)
+            if (data.CanMergeItems())
+                return true;
+
+        return false;
+    }
+
+    public void GameStateChangedCallback(EGameState gameState)
+    {
+        if (gameState == EGameState.LEVELCOMPLETE || gameState == EGameState.GAMEOVER)
+            StopLastSpaceWarning();
     }
 
 
@@ -305,7 +371,7 @@ public class ItemSpotsManager : MonoBehaviour
 
         Vector3 target = item.transform.parent.TransformPoint(itemLocalPositionOnSpot);
         float depth = Mathf.Abs(target.z - start.z);
-        targetSpot.SetLandingStrength(depth * bounceStrengthPerUnit);
+        targetSpot.SetLandingStrength(depth * bounceStrengthPerUnit, fromBoard);
 
         Action onArrived = () =>
         {
@@ -371,10 +437,30 @@ public class ItemSpotsManager : MonoBehaviour
         float duration = Mathf.Max(.05f, distance * slideSecondsPerUnit * sameRowSlideMultiplier);
         int slotsPassed = Mathf.Max(1, Mathf.RoundToInt(distance / spotSpacing));
 
+        // Slots strictly between start and target glint as the item passes over them.
+        List<ItemSpot> passed = new List<ItemSpot>();
+        float minX = Mathf.Min(start.x, target.x), maxX = Mathf.Max(start.x, target.x);
+        for (int i = 0; i < spots.Length; i++)
+        {
+            float x = spots[i].transform.position.x;
+            if (x > minX + spotSpacing * .25f && x < maxX - spotSpacing * .25f)
+                passed.Add(spots[i]);
+        }
+
         LeanTween.value(item.gameObject, 0f, 1f, duration)
             .setOnUpdate((float t) =>
             {
                 Vector3 position = Vector3.Lerp(start, parent.TransformPoint(itemLocalPositionOnSpot), t);
+
+                for (int i = passed.Count - 1; i >= 0; i--)
+                {
+                    float spotX = passed[i].transform.position.x;
+                    if ((target.x > start.x && position.x >= spotX) || (target.x < start.x && position.x <= spotX))
+                    {
+                        passed[i].PlayPassShine();
+                        passed.RemoveAt(i);
+                    }
+                }
 
                 float hop = t * slotsPassed;
                 float u = hop - Mathf.Floor(hop);
@@ -490,6 +576,7 @@ public class ItemSpotsManager : MonoBehaviour
 
         item.Spot.Clear();
         item.UnassignSpot();
+        UpdateLastSpaceWarning();
 
         MoveAllItemsToLeft(SetNotBusy);
 
@@ -522,6 +609,7 @@ public class ItemSpotsManager : MonoBehaviour
         }
 
         isBusy = true;
+        UpdateLastSpaceWarning();
         MoveAllItemsToLeft(SetNotBusy);
 
         return true;

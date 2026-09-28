@@ -16,6 +16,18 @@ public class ItemSpot : MonoBehaviour
     [Tooltip("Size of the merge jump (slot dips as its item leaves for a merge), about 1.44x the landing bounce.")]
     [SerializeField] private float jumpAmplitude = .029f;
 
+    [Header(" Shine ")]
+    // A tint over the slot (blend toward a colour, 0 = the slot's own look),
+    // used by the landing / pass shines, the Spring flash and the red warning.
+    [SerializeField] private Color landingShineColor = Color.white;
+    [Tooltip("Shine peak when an item lands from the board (only when the landing bounce plays).")]
+    [SerializeField] private float landingShinePeak = .42f;
+    [Tooltip("Landing shine multiplier for a slide inside the rack.")]
+    [SerializeField] private float slideLandingShineScale = .35f;
+    [Tooltip("Faint glint when a sliding item passes over this slot.")]
+    [SerializeField] private float passShinePeak = .147f;
+    [SerializeField] private float shineFadeTime = .333f;
+
     // Damped bounce: down, up, down, settle. Times are cumulative seconds;
     // offsets are fractions of the amplitude. Each step eases in-out sine.
     private static readonly float[] bounceTimes = { 0f, .05f, .133f, .25f, .383f };
@@ -33,6 +45,12 @@ public class ItemSpot : MonoBehaviour
 
     private Vector3 restPosition;
     private float landingStrength;
+    private bool landingFromBoard = true;
+
+    private Color shineColor = Color.white;
+    private float shineAlpha;
+    private bool isWarning;
+    public bool IsWarning => isWarning;
 
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
@@ -68,43 +86,110 @@ public class ItemSpot : MonoBehaviour
         item = null;
     }
 
-    // Tints the slot to the colour and back, through a property block so no
-    // material copy is made. Restores the material's own colour exactly.
+    // Spring: tint to the colour and back (in easeOutSine, out easeInSine).
     public void PlayFlash(Color color, float inTime, float outTime)
     {
         if (slotRenderer == null)
             return;
 
-        Material material = slotRenderer.sharedMaterial;
-        int colorId = material.HasProperty(BaseColorId) ? BaseColorId : ColorId;
-        Color baseColor = material.GetColor(colorId);
         GameObject target = slotRenderer.gameObject;
-
-        if (flashBlock == null)
-            flashBlock = new MaterialPropertyBlock();
-
         LeanTween.cancel(target);
+        shineColor = color;
 
-        LeanTween.value(target, 0f, 1f, inTime)
+        LeanTween.value(target, shineAlpha, 1f, inTime)
             .setEase(LeanTweenType.easeOutSine)
-            .setOnUpdate((float k) => SetTint(colorId, Color.Lerp(baseColor, color, k)));
+            .setOnUpdate(SetShine);
 
         LeanTween.value(target, 1f, 0f, outTime)
             .setDelay(inTime)
             .setEase(LeanTweenType.easeInSine)
-            .setOnUpdate((float k) => SetTint(colorId, Color.Lerp(baseColor, color, k)))
-            .setOnComplete(() => slotRenderer.SetPropertyBlock(null));
+            .setOnUpdate(SetShine)
+            .setOnComplete(() => SetShine(0));
     }
 
-    private void SetTint(int colorId, Color color)
+    // Snap to the peak and fade out. Skipped while the warning owns the slot.
+    public void PlayShine(Color color, float peak, float fadeTime)
     {
-        flashBlock.SetColor(colorId, color);
+        if (slotRenderer == null || isWarning)
+            return;
+
+        GameObject target = slotRenderer.gameObject;
+        LeanTween.cancel(target);
+        shineColor = color;
+        SetShine(peak);
+
+        LeanTween.value(target, peak, 0f, fadeTime)
+            .setEase(LeanTweenType.easeOutSine)
+            .setOnUpdate(SetShine)
+            .setOnComplete(() => SetShine(0));
+    }
+
+    // A sliding item passed over this slot.
+    public void PlayPassShine()
+        => PlayShine(landingShineColor, passShinePeak, shineFadeTime);
+
+    // Pulses 0 -> 1 -> 0 (each half easeInOutSine) until stopped.
+    public void StartWarning(Color color, float halfPeriod)
+    {
+        if (slotRenderer == null || isWarning)
+            return;
+
+        GameObject target = slotRenderer.gameObject;
+        LeanTween.cancel(target);
+        isWarning = true;
+        shineColor = color;
+
+        LeanTween.value(target, 0f, 1f, halfPeriod)
+            .setEase(LeanTweenType.easeInOutSine)
+            .setLoopPingPong(-1)
+            .setOnUpdate(SetShine);
+    }
+
+    // Fades from wherever the pulse is to 0.
+    public void StopWarning(float fadeTime)
+    {
+        if (slotRenderer == null || !isWarning)
+            return;
+
+        GameObject target = slotRenderer.gameObject;
+        LeanTween.cancel(target);
+        isWarning = false;
+
+        LeanTween.value(target, shineAlpha, 0f, fadeTime)
+            .setEase(LeanTweenType.easeOutSine)
+            .setOnUpdate(SetShine)
+            .setOnComplete(() => SetShine(0));
+    }
+
+    // Tint = blend from the material's own colour toward the shine colour,
+    // through a property block (no material copy). At 0 the block is cleared,
+    // which restores the original look exactly.
+    private void SetShine(float alpha)
+    {
+        shineAlpha = Mathf.Clamp01(alpha);
+
+        if (shineAlpha <= 0)
+        {
+            slotRenderer.SetPropertyBlock(null);
+            return;
+        }
+
+        Material material = slotRenderer.sharedMaterial;
+        int colorId = material.HasProperty(BaseColorId) ? BaseColorId : ColorId;
+
+        if (flashBlock == null)
+            flashBlock = new MaterialPropertyBlock();
+
+        flashBlock.SetColor(colorId, Color.Lerp(material.GetColor(colorId), shineColor, shineAlpha));
         slotRenderer.SetPropertyBlock(flashBlock);
     }
 
     // How hard the next landing hits, 0..1 (set when an item is sent here).
-    public void SetLandingStrength(float strength)
-        => landingStrength = Mathf.Clamp01(strength);
+    public void SetLandingStrength(float strength, bool fromBoard = true)
+    {
+        landingStrength = Mathf.Clamp01(strength);
+        landingFromBoard = fromBoard;
+    }
 
     public void BumpDown()
     {
@@ -115,6 +200,7 @@ public class ItemSpot : MonoBehaviour
             return;
 
         PlayProfile(bounceTimes, bounceY, bounceZ, strength * bounceAmplitude, false);
+        PlayShine(landingShineColor, landingShinePeak * (landingFromBoard ? 1f : slideLandingShineScale), shineFadeTime);
     }
 
     // Slot dips as its item leaves for a merge.
