@@ -761,11 +761,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 958479024c6ce428a8f22b6e7005669a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MergeManager
-  goUpDistance: 0.15
-  goUpDuration: 0.15
-  goUpEasing: 16
-  smashDuration: 0.15
-  smashEasing: 27
+  mergeSpeedMultiplier: 1
+  finishTime: 0.5
+  windUpDistance: 0.22
+  outerHopY: 0.1
+  outerHopZ: 0.38
+  middleLiftY: 0.094
+  middleLiftZ: 0.343
+  middleSettleY: -0.0045
+  middleSettleZ: -0.016
+  swellScale: 1.5
   mergeParticles: {fileID: 8471511895484224451, guid: a615112ab480749a39aa2d78f2308e99, type: 3}
 --- !u!1001 &255609582
 PrefabInstance:
@@ -10124,7 +10129,7 @@ ParticleSystem:
           m_PostInfinity: 2
           m_RotationOrder: 4
       cycleCount: 1
-      repeatInterval: 0.0001
+      repeatInterval: 0.01
       probability: 1
   SizeModule:
     enabled: 1
