@@ -115,7 +115,7 @@ public class Item : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        if (IsBeingThrown && other.GetComponent<BoardEnterZone>() != null)
+        if (IsBeingThrown && BoardService.Instance != null && other == BoardService.Instance.Trigger)
             EndThrow();
     }
 
