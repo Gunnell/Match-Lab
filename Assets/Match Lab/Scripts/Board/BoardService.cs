@@ -57,8 +57,6 @@ public class BoardService : MonoBehaviour
 
     [Header(" Background ")]
     [SerializeField] private Material backgroundMaterial;
-    [Tooltip("The background fills this camera's view. Camera.main if empty.")]
-    [SerializeField] private Camera viewCamera;
 
     public static event Action OnBoardClear;
 
@@ -69,10 +67,6 @@ public class BoardService : MonoBehaviour
 
     private Vector3 innerSize = new Vector3(Width, Height, Depth);
     private float wallThickness = Thickness;
-
-    // Last camera state the background was sized for.
-    private bool lastOrthographic;
-    private float lastOrthoSize, lastFov, lastAspect, lastCameraY;
 
     // Item registry: one bucket per item type. Buckets are kept in a flat list
     // too, so walking every item needs no dictionary enumeration.
@@ -104,6 +98,7 @@ public class BoardService : MonoBehaviour
         }
 
         Instance = this;
+        CameraService.OnCameraSizeChanged += RefreshBackground;
         Initialize();
     }
 
@@ -113,15 +108,10 @@ public class BoardService : MonoBehaviour
             return;
 
         Instance = null;
+        CameraService.OnCameraSizeChanged -= RefreshBackground;
 
         if (root != null)
             Destroy(root.gameObject);
-    }
-
-    private void LateUpdate()
-    {
-        if (CameraViewChanged())
-            RefreshBackground();
     }
 
     public void Initialize()
@@ -233,62 +223,20 @@ public class BoardService : MonoBehaviour
 
     /// <summary>
     /// Sizes the background plane to fill the camera view. Runs on init and
-    /// whenever the camera's size, field of view or aspect changes.
+    /// whenever <see cref="CameraService.OnCameraSizeChanged"/> fires.
     /// </summary>
     public void RefreshBackground()
     {
-        Camera cam = GetViewCamera();
-        if (background == null || cam == null)
+        CameraService cameraService = CameraService.Instance;
+        if (background == null || cameraService == null)
             return;
 
-        Vector2 view = GetViewSize(cam);
         background.localPosition = Vector3.zero;
         background.localRotation = Quaternion.identity;
         background.localScale = new Vector3(
-            view.x / BackgroundPlaneSize,
+            cameraService.ScreenWidth / BackgroundPlaneSize,
             1f,
-            view.y / BackgroundPlaneSize * BackgroundDepthOverscan);
-
-        StoreCameraState(cam);
-    }
-
-    /// <summary>
-    /// World-space width and height of the camera view on the floor plane.
-    /// Orthographic: height = 2 x size, width = height x aspect. A perspective
-    /// camera is measured at its distance to the floor.
-    /// </summary>
-    private static Vector2 GetViewSize(Camera cam)
-    {
-        float height = cam.orthographic
-            ? 2f * cam.orthographicSize
-            : 2f * Mathf.Abs(cam.transform.position.y) * Mathf.Tan(cam.fieldOfView * .5f * Mathf.Deg2Rad);
-
-        return new Vector2(height * cam.aspect, height);
-    }
-
-    private Camera GetViewCamera()
-        => viewCamera != null ? viewCamera : Camera.main;
-
-    private bool CameraViewChanged()
-    {
-        Camera cam = GetViewCamera();
-        if (cam == null)
-            return false;
-
-        return cam.orthographic != lastOrthographic
-            || !Mathf.Approximately(cam.orthographicSize, lastOrthoSize)
-            || !Mathf.Approximately(cam.fieldOfView, lastFov)
-            || !Mathf.Approximately(cam.aspect, lastAspect)
-            || (!cam.orthographic && !Mathf.Approximately(cam.transform.position.y, lastCameraY));
-    }
-
-    private void StoreCameraState(Camera cam)
-    {
-        lastOrthographic = cam.orthographic;
-        lastOrthoSize = cam.orthographicSize;
-        lastFov = cam.fieldOfView;
-        lastAspect = cam.aspect;
-        lastCameraY = cam.transform.position.y;
+            cameraService.ScreenHeight / BackgroundPlaneSize * BackgroundDepthOverscan);
     }
 
     #endregion
