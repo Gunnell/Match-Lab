@@ -12124,7 +12124,7 @@ MonoBehaviour:
   bottomPanel: {fileID: 4908531285313324527}
   fitBox: {x: 1.5, y: 2.25}
   fitBoxSlotWidth: 1.28
-  rackBase: 0.65
+  rackBase: 0.75
   arcLift: 9.5
   arcBackPull: 0.25
   flightSecondsPerUnit: 0.0325

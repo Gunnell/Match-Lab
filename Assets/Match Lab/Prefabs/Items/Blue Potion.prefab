@@ -75,7 +75,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Item
   itemName: 1
   icon: {fileID: 21300000, guid: 0617d8b5f92b9407ba9cc9d68e1f3240, type: 3}
-  boardSize: 1.5
+  boardSize: 2.65
   renderer: {fileID: 7147295219988455828}
   collider: {fileID: 4843256342359290978}
 --- !u!1 &4065036387562629971
