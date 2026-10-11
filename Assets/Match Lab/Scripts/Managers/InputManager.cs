@@ -17,11 +17,21 @@ public class InputManager : MonoBehaviour
     [Header(" Settings ")]
     [SerializeField] private Material outlineMaterial;
     [SerializeField] private LayerMask powerupLayer;
+    [Tooltip("Board items only. Never the board walls or the enter trigger, which sit between the camera and the items.")]
+    [SerializeField] private LayerMask itemLayer;
     private Item currentItem;
+
+    // The camera is far back (orthographic, ~100 units from the board), so
+    // tap rays are never cut short.
+    private const float RayDistance = Mathf.Infinity;
+
     private void Awake()
     {
         // Static, so it would survive a scene reload mid-lock.
         lockCount = 0;
+
+        if (itemLayer == 0)
+            itemLayer = LayerMask.GetMask("Items");
     }
 
     // Update is called once per frame
@@ -59,7 +69,7 @@ public class InputManager : MonoBehaviour
 
     private void HandleMouseDown()
     {
-        Physics.Raycast(Camera.main.ScreenPointToRay(Input.mousePosition), out RaycastHit hit, 100, powerupLayer);
+        Physics.Raycast(Camera.main.ScreenPointToRay(Input.mousePosition), out RaycastHit hit, RayDistance, powerupLayer);
 
         if (hit.collider != null && hit.collider.TryGetComponent(out Powerup powerup))
         {
@@ -75,7 +85,7 @@ public class InputManager : MonoBehaviour
     private void HandleDrag()
     {
 
-        Physics.Raycast(Camera.main.ScreenPointToRay(Input.mousePosition), out RaycastHit hit, 100);
+        Physics.Raycast(Camera.main.ScreenPointToRay(Input.mousePosition), out RaycastHit hit, RayDistance, itemLayer);
 
         if(hit.collider == null)
         {

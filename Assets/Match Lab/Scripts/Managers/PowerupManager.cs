@@ -15,21 +15,21 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     // Flight: each item follows a cubic Bezier (start, ctrl, approach, nozzle)
     // at constant speed, easing in so it speeds up into the nozzle.
     [Tooltip("The approach point sits this far from the nozzle toward the board, so items come in from the board side.")]
-    [SerializeField] private float vacuumApproachDistance = 1.1f;
+    [SerializeField] private float vacuumApproachDistance = 2.25f;
     [Tooltip("Board items: control point moves toward the nozzle in x by at most this much.")]
-    [SerializeField] private float vacuumBoardCtrlMaxX = 2.1f;
+    [SerializeField] private float vacuumBoardCtrlMaxX = 4.25f;
     [Tooltip("Board items: control point this high above the top of the pile.")]
-    [SerializeField] private float vacuumBoardCtrlLift = .6f;
+    [SerializeField] private float vacuumBoardCtrlLift = 1.2f;
     [Tooltip("Board items: control point this far into the board from the start.")]
-    [SerializeField] private float vacuumBoardCtrlZ = 1.25f;
+    [SerializeField] private float vacuumBoardCtrlZ = 2.5f;
     [Tooltip("Rack items: control point moves toward the nozzle in x by at most this much.")]
-    [SerializeField] private float vacuumRackCtrlMaxX = 1.6f;
+    [SerializeField] private float vacuumRackCtrlMaxX = 3.25f;
     [Tooltip("Rack items: control point this far into the board from the start (kept at rack height).")]
-    [SerializeField] private float vacuumRackCtrlZ = 2.7f;
+    [SerializeField] private float vacuumRackCtrlZ = 5.42f;
     [Tooltip("Seconds per metre of path, board items.")]
-    [SerializeField] private float vacuumBoardSecondsPerMetre = .09f;
+    [SerializeField] private float vacuumBoardSecondsPerMetre = .0362f;
     [Tooltip("Seconds per metre of path, rack items.")]
-    [SerializeField] private float vacuumRackSecondsPerMetre = .12f;
+    [SerializeField] private float vacuumRackSecondsPerMetre = .0442f;
     [SerializeField] private float vacuumStagger = .35f;
     [SerializeField] private int vacuumPathSamples = 25;
     [SerializeField] private float vacuumSwellScale = 1.42f;
@@ -45,7 +45,8 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private Transform springLaunchPoint;
     [Tooltip("Aim point for the throw. Falls back to straight ahead (+z).")]
     [SerializeField] private Transform springBoardCenter;
-    [Tooltip("Board wall between the button and the board; the thrown item passes through it until it is inside the board.")]
+    [Tooltip("Board wall between the button and the board; the thrown item passes through it until it is inside the board. "
+        + "Falls back to the board's front wall (BoardService.ThrowCollider).")]
     [SerializeField] private Collider springThrowCollider;
     [SerializeField] private float springLaunchDelay = .265f;
     [Tooltip("Rack size to full size after launch. Not affected by the speed multiplier.")]
@@ -53,7 +54,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private float springSideRandom = .3f;
     [SerializeField] private float springSideMultiplier = 2f;
     [Tooltip("Launch this far to either side of the board centre and the throw is nudged back toward the middle.")]
-    [SerializeField] private float springEdgeDistance = 1f;
+    [SerializeField] private float springEdgeDistance = 3f;
     [SerializeField] private float springEdgeBonus = .12f;
     [SerializeField] private float springSideForce = 275f;
     [SerializeField] private float springUpForce = 525f;
@@ -61,10 +62,8 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private float springForwardForce = 275f;
     [SerializeField] private float springForwardMultiplier = 2.15f;
     [SerializeField] private Vector2 springTorqueRange = new Vector2(40, 120);
-    [Tooltip("Scales the launch forces to this world, like fanForceScale. The Fan's .28 is too weak here: "
-        + "the button sits behind the board's front wall, and at .28 the item lands inside that wall. "
-        + ".75 carries it well into the board (lands between the front third and the middle, depending on the pile).")]
-    [SerializeField] private float springForceScale = .75f;
+    [Tooltip("Scales the launch forces (and the extra fall). Tuned so the item clears the front lip and lands around the middle of the board.")]
+    [SerializeField] private float springForceScale = 1f;
     [Tooltip("Extra downward pull after launch so the item lands quickly.")]
     [SerializeField] private float springExtraFall = 1500f;
     [SerializeField] private float springFallMultiplier = 1f;
@@ -81,8 +80,8 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private float springSlotFlashOut = .133f;
     [Tooltip("Burst where the item vanished. Should destroy itself when done.")]
     [SerializeField] private ParticleSystem springSlotBurstPrefab;
-    [Tooltip("Burst position relative to the slot (world; +Y toward the camera, +Z up on screen).")]
-    [SerializeField] private Vector3 springSlotBurstOffset = new Vector3(0, .28f, .18f);
+    [Tooltip("Burst position relative to the slot: X along the rack, Y toward the camera, Z up on screen.")]
+    [SerializeField] private Vector3 springSlotBurstOffset = new Vector3(0, .56f, .36f);
 
     [Header(" Fan Elements ")]
     [SerializeField] private Fan fan;
@@ -96,9 +95,12 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private Vector2 fanThrowUpForce = new Vector2(650, 750);
     [SerializeField] private float fanThrowSideForce = 300;
     [SerializeField] private Vector2 fanThrowTorque = new Vector2(20, 50);
-    [Tooltip("Scales the throw forces to this world. At 1 an item (mass 1) is thrown ~10 m up, "
-        + "past the camera; .28 lands it inside the 0.8s window before collisions return.")]
-    [SerializeField] private float fanForceScale = .28f;
+    [Tooltip("Scales the throw forces. At 1 (gravity -12) an item rises ~8 units and lands after ~2.3s. "
+        + "Items may still be in the air when item collisions return at fanEndTime: the window only covers the launch, "
+        + "so items spread instead of colliding while rising.")]
+    [SerializeField] private float fanForceScale = 1f;
+    [Tooltip("Scales the throw torque.")]
+    [SerializeField] private float fanTorqueScale = 1f;
 
     [Header(" Freeze Gun Elements ")]
     [SerializeField] private FreezeGun freezeGun;
@@ -111,10 +113,11 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private float freezeFireDelay = .8f;
     [Tooltip("Divides the fire delay.")]
     [SerializeField] private float freezeSpeedMultiplier = 1f;
-    [Tooltip("Constant speed flight: seconds per unit of distance.")]
-    [SerializeField] private float freezeProjectileSecondsPerUnit = .035f;
-    [Tooltip("The shot ends this far in front of the camera, under the timer on screen, so it flies over the pile instead of under it.")]
-    [SerializeField] private float freezeTargetDepth = 4f;
+    [Tooltip("Constant speed flight: seconds per unit of distance (.0138 = ~72 units/s).")]
+    [SerializeField] private float freezeProjectileSecondsPerUnit = .0138f;
+    [Tooltip("The shot flies at the gun's depth, moved this far toward the camera, and ends under the timer on screen. "
+        + "The camera is orthographic, so depth only decides what the shot is drawn in front of.")]
+    [SerializeField] private float freezeTargetDepthOffset = 2f;
     [SerializeField] private float freezeProjectileRecycleDelay = .5f;
     [SerializeField] private FreezeOverlay freezeOverlay;
     [Tooltip("Burst played where the shot hits the timer.")]
@@ -513,7 +516,8 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
             .setOnComplete(() => ItemReachedVacuum(item));
 
         // Swell, settle back, then shrink into the nozzle in the last 0.05s.
-        Vector3 baseScale = item.transform.localScale;
+        // All relative to the board size: rack items grow back to it on the way.
+        Vector3 baseScale = item.BaseScale;
         float body = duration - .05f;
 
         LeanTween.scale(item.gameObject, baseScale * vacuumSwellScale, body * .25f)
@@ -702,7 +706,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
             fromSpot.PlayFlash(springSlotFlashColor, springSlotFlashIn / springSpeedMultiplier, springSlotFlashOut / springSpeedMultiplier);
 
         if (springSlotBurstPrefab != null)
-            Instantiate(springSlotBurstPrefab, burstBase + springSlotBurstOffset, Quaternion.identity).Play();
+            Instantiate(springSlotBurstPrefab, burstBase + SlotBurstOffset(), Quaternion.identity).Play();
 
         if (spring != null)
             spring.PlayLoad(launchDelay);
@@ -745,7 +749,8 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         LeanTween.scale(item.gameObject, item.BaseScale, springScaleDuration)
             .setEase(LeanTweenType.easeOutQuad);
 
-        item.BeginThrow(springThrowCollider);
+        item.BeginThrow(springThrowCollider != null ? springThrowCollider
+            : BoardService.Instance != null ? BoardService.Instance.ThrowCollider : null);
         LaunchSpringItem(rb);
 
         StartCoroutine(SpringExtraFall(item, rb));
@@ -761,7 +766,9 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     // is pushed back toward the middle near the board's side edges.
     private void LaunchSpringItem(Rigidbody rb)
     {
-        Vector3 launchPos = rb.position;
+        // The transform, not rb.position: the item was just moved to the launch
+        // point and the body still holds its old rack pose until the next sync.
+        Vector3 launchPos = rb.transform.position;
         Vector3 forward = Vector3.forward;
 
         if (springBoardCenter != null)
@@ -802,6 +809,11 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         rb.AddForce(force * springForceScale, ForceMode.Force);
         rb.AddTorque(torque * springForceScale, ForceMode.Force);
     }
+
+    private Vector3 SlotBurstOffset()
+        => Vector3.right * springSlotBurstOffset.x
+        + CameraService.TowardCamera * springSlotBurstOffset.y
+        + CameraService.ScreenUp * springSlotBurstOffset.z;
 
     private float RandomSpringTorque()
     {
@@ -955,7 +967,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         // ForceMode.Force applied once: it acts for one
         // physics step, i.e. a velocity change of force * fixedDeltaTime / mass.
         rb.AddForce(force * fanForceScale, ForceMode.Force);
-        rb.AddTorque(torque * fanForceScale, ForceMode.Force);
+        rb.AddTorque(torque * fanTorqueScale, ForceMode.Force);
     }
 
     // Each axis 20-49 with a random sign.
@@ -1095,7 +1107,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
             freezeOverlay.FadeOut();
     }
 
-    // The point in front of the camera that sits under the timer on screen.
+    // The point under the timer on screen, at the gun's depth moved toward the camera.
     private Vector3 GetFreezeTargetPoint()
     {
         Camera cam = Camera.main;
@@ -1103,9 +1115,12 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         if (freezeTarget == null || cam == null)
             return transform.position;
 
+        Vector3 gun = freezeGun != null ? freezeGun.Muzzle.position : transform.position;
+        float depth = Vector3.Dot(gun - cam.transform.position, cam.transform.forward) - freezeTargetDepthOffset;
+
         // Overlay canvas: the RectTransform's position is already in screen space.
         Vector2 screen = RectTransformUtility.WorldToScreenPoint(null, freezeTarget.position);
-        return cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, freezeTargetDepth));
+        return cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, depth));
     }
 
     private GameObject SpawnFreezeProjectile(Vector3 position)
@@ -1118,7 +1133,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         Destroy(sphere.GetComponent<Collider>());
         sphere.name = "Freeze Projectile (placeholder)";
         sphere.transform.position = position;
-        sphere.transform.localScale = Vector3.one * .25f;
+        sphere.transform.localScale = Vector3.one * .5f;
         sphere.GetComponent<Renderer>().material.color = new Color(.6f, .9f, 1f);
         return sphere;
     }

@@ -48,7 +48,7 @@ public class CameraService : MonoBehaviour
 
     public static CameraService Instance { get; private set; }
 
-    /// <summary>Raised when <see cref="ScreenWidth"/> or <see cref="ScreenHeight"/> changes.</summary>
+    /// <summary>Raised when <see cref="ScreenWidth"/>, <see cref="ScreenHeight"/> or a safe-area offset changes.</summary>
     public static event Action OnCameraSizeChanged;
 
     [SerializeField] private Camera cam;
@@ -64,6 +64,13 @@ public class CameraService : MonoBehaviour
     private Rect lastSafeArea;
 
     public Camera Camera => cam;
+    /// <summary>The tilting rig root (this transform); the camera looks along its forward.</summary>
+    public Transform Pivot => transform;
+
+    /// <summary>World direction that reads as up on screen.</summary>
+    public static Vector3 ScreenUp => Instance != null ? Instance.transform.up : Vector3.forward;
+    /// <summary>World direction toward the camera.</summary>
+    public static Vector3 TowardCamera => Instance != null ? -Instance.transform.forward : Vector3.up;
     public Transform Container => container;
 
     /// <summary>World units, full view height.</summary>
@@ -153,11 +160,12 @@ public class CameraService : MonoBehaviour
 
     /// <summary>
     /// Sets the orthographic size and the values derived from it. Raises
-    /// <see cref="OnCameraSizeChanged"/> when the view size changes.
+    /// <see cref="OnCameraSizeChanged"/> when the view size or a safe-area offset changes.
     /// </summary>
     public void SetCameraSize(float size)
     {
         float oldWidth = ScreenWidth, oldHeight = ScreenHeight;
+        float oldTopSafe = TopSafeOffset, oldBottomSafe = BottomSafeOffset;
 
         cam.orthographicSize = size;
         ScreenHeight = 2f * size;
@@ -170,7 +178,8 @@ public class CameraService : MonoBehaviour
 
         PlaceViewBlockers();
 
-        if (!Mathf.Approximately(oldWidth, ScreenWidth) || !Mathf.Approximately(oldHeight, ScreenHeight))
+        if (!Mathf.Approximately(oldWidth, ScreenWidth) || !Mathf.Approximately(oldHeight, ScreenHeight)
+            || !Mathf.Approximately(oldTopSafe, TopSafeOffset) || !Mathf.Approximately(oldBottomSafe, BottomSafeOffset))
             OnCameraSizeChanged?.Invoke();
     }
 

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 
@@ -13,6 +14,9 @@ public class Item : MonoBehaviour
 
     [SerializeField] private Sprite icon;
     public Sprite Icon => icon;
+
+    [Tooltip("Size on the board relative to the prefab's scale, per item type. Applied once when the item is created.")]
+    [SerializeField] private float boardSize = 1f;
     [Header(" Elements ")]
     [SerializeField] private Renderer renderer;
     [SerializeField] private Collider collider;
@@ -33,6 +37,7 @@ public class Item : MonoBehaviour
     private void Awake()
     {
         baseMaterial = renderer.material;
+        transform.localScale *= boardSize;
         baseScale = transform.localScale;
     }
 
@@ -40,6 +45,46 @@ public class Item : MonoBehaviour
     /// The local scale the item had on the board, before it was shrunk onto a spot.
     /// </summary>
     public Vector3 BaseScale => baseScale;
+
+    // Measured once per item type (every item of a type shares one prefab).
+    private static readonly Dictionary<EItemName, Bounds> boardBoundsCache = new Dictionary<EItemName, Bounds>();
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStatics() => boardBoundsCache.Clear();
+
+    /// <summary>
+    /// The renderer's bounds in the item's own axes at board scale (X width, Y height),
+    /// whatever the item's current rotation or scale. In the units of the level's
+    /// item parent: multiply by its world scale for world units.
+    /// </summary>
+    public Bounds BoardBounds
+    {
+        get
+        {
+            if (boardBoundsCache.TryGetValue(itemName, out Bounds cached))
+                return cached;
+
+            Bounds local = renderer.localBounds;
+            Vector3 min = local.min, max = local.max;
+            Bounds bounds = default;
+
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 corner = new Vector3((i & 1) == 0 ? min.x : max.x, (i & 2) == 0 ? min.y : max.y, (i & 4) == 0 ? min.z : max.z);
+                // Item space at scale 1, then at board scale.
+                Vector3 point = transform.InverseTransformPoint(renderer.transform.TransformPoint(corner));
+                point = Vector3.Scale(point, baseScale);
+
+                if (i == 0)
+                    bounds = new Bounds(point, Vector3.zero);
+                else
+                    bounds.Encapsulate(point);
+            }
+
+            boardBoundsCache[itemName] = bounds;
+            return bounds;
+        }
+    }
 
     /// <summary>
     /// Remembers how the item lay on the board, so Spring can send it back there.

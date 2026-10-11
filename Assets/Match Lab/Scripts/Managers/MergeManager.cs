@@ -9,7 +9,8 @@ public class MergeManager : MonoBehaviour
     // the left and middle slots dip, the items leave one after another, the
     // outer two pull outward then slam into the raised middle item and vanish,
     // the middle swells and pops at finishTime.
-    // World axes: +Y toward the camera, +Z up on screen, X along the rack.
+    // Offsets: X along the rack, "Y" toward the camera, "Z" up on screen
+    // (both follow the camera tilt, see CameraService.TowardCamera / ScreenUp).
 
     [Header(" Timing ")]
     [SerializeField] private float mergeSpeedMultiplier = 1f;
@@ -18,17 +19,17 @@ public class MergeManager : MonoBehaviour
 
     [Header(" Outer Items ")]
     [Tooltip("Outward pull (away from the middle) before flying in.")]
-    [SerializeField] private float windUpDistance = .22f;
+    [SerializeField] private float windUpDistance = .45f;
     [Tooltip("Hop toward the camera before diving to the meeting point.")]
-    [SerializeField] private float outerHopY = .10f;
+    [SerializeField] private float outerHopY = .21f;
     [Tooltip("Hop up the screen before diving to the meeting point.")]
-    [SerializeField] private float outerHopZ = .38f;
+    [SerializeField] private float outerHopZ = .77f;
 
     [Header(" Middle Item ")]
-    [SerializeField] private float middleLiftY = .094f;
-    [SerializeField] private float middleLiftZ = .343f;
-    [SerializeField] private float middleSettleY = -.0045f;
-    [SerializeField] private float middleSettleZ = -.016f;
+    [SerializeField] private float middleLiftY = .188f;
+    [SerializeField] private float middleLiftZ = .687f;
+    [SerializeField] private float middleSettleY = -.009f;
+    [SerializeField] private float middleSettleZ = -.033f;
     [SerializeField] private float swellScale = 1.5f;
 
     [Header(" Effects ")]
@@ -112,12 +113,12 @@ public class MergeManager : MonoBehaviour
                 Detach(middle);
                 middleBase = middle.transform.position;
                 middleScale = middle.transform.localScale;
-                meetingPoint = middleBase + new Vector3(0, middleLiftY + middleSettleY, middleLiftZ + middleSettleZ);
+                meetingPoint = middleBase + Offset(middleLiftY + middleSettleY, middleLiftZ + middleSettleZ);
             }
 
             if (middleLeft && middle != null)
             {
-                Vector3 lifted = middleBase + new Vector3(0, middleLiftY, middleLiftZ);
+                Vector3 lifted = middleBase + Offset(middleLiftY, middleLiftZ);
                 middle.transform.position = time < MiddleLiftEnd
                     ? Vector3.LerpUnclamped(middleBase, lifted, EaseOutSine(Segment(time, MiddleLeaveTime, MiddleLiftEnd)))
                     : Vector3.LerpUnclamped(lifted, meetingPoint, EaseInSine(Segment(time, MiddleLiftEnd, MiddleSettleEnd)));
@@ -212,14 +213,19 @@ public class MergeManager : MonoBehaviour
                 : Mathf.Lerp(outX, middleX, EaseInSine(Segment(time, times[1], times[2])));
 
             // Y/Z: hop up, then dive onto the meeting point.
-            Vector3 hop = start + new Vector3(0, manager.outerHopY, manager.outerHopZ);
+            Vector3 hop = start + Offset(manager.outerHopY, manager.outerHopZ);
             Vector3 yz = time < times[3] || !meetingKnown
                 ? Vector3.Lerp(start, hop, EaseOutSine(Segment(time, times[0], times[3])))
                 : Vector3.Lerp(hop, meetingPoint, EaseInSine(Segment(time, times[3], times[4])));
 
+            // The camera only tilts around X, so both offsets leave world X alone.
             item.transform.position = new Vector3(x, yz.y, yz.z);
         }
     }
+
+    // "Y" toward the camera, "Z" up on screen.
+    private static Vector3 Offset(float towardCamera, float screenUp)
+        => CameraService.TowardCamera * towardCamera + CameraService.ScreenUp * screenUp;
 
     private static float Segment(float time, float from, float to)
         => Mathf.Clamp01((time - from) / (to - from));

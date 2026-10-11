@@ -7,12 +7,21 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     public static ItemSpotsManager instance;
      
     [Header (" Elements ")]
-    [SerializeField] private Transform itemSpotsParent;
+    [Tooltip("Hosts the rack slots; its item containers' spots are used left to right.")]
+    [SerializeField] private GameplayBottomPanel bottomPanel;
     private ItemSpot[] spots;
+    private ItemContainer[] containers;
 
-    [Header(" Settings ")]
-    [SerializeField] private Vector3 itemLocalPositionOnSpot;
-    [SerializeField] private Vector3 itemLocalScaleOnSpot;
+    [Header(" Rack Fit ")]
+    // Each item type gets its own rack size: one that fits the box shows at
+    // rackBase of its board size, a bigger one is shrunk until it fits
+    // rackBase x the box. The box follows the real slot width.
+    [Tooltip("Fit box (width, height) for a slot art width of fitBoxSlotWidth.")]
+    [SerializeField] private Vector2 fitBox = new Vector2(1.5f, 2.25f);
+    [Tooltip("Slot art width the fit box is sized for. The box is scaled by the real slot width / this.")]
+    [SerializeField] private float fitBoxSlotWidth = 1.28f;
+    [Tooltip("Rack size relative to the board size, for items that fit the box.")]
+    [SerializeField] private float rackBase = .65f;
     private bool isBusy;
     public bool IsBusy => isBusy;
 
@@ -22,25 +31,25 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     [Header(" Board To Rack Flight ")]
     // Board items fly along an arc (quadratic Bezier) at constant speed, the
     // duration following the path length.
-    [Tooltip("Arc control point height above the start. World +Y is toward the camera, so the item looms up.")]
-    [SerializeField] private float arcLift = 4.75f;
+    [Tooltip("Arc control point height above the start (world +Y, mostly toward the camera), so the item looms up.")]
+    [SerializeField] private float arcLift = 9.5f;
     [Tooltip("Control point pulled away from the rack by this fraction of the depth distance: a slight wind-up.")]
     [SerializeField] private float arcBackPull = .25f;
-    [SerializeField] private float flightSecondsPerUnit = .065f;
+    [SerializeField] private float flightSecondsPerUnit = .0325f;
     [SerializeField] private float minFlightDuration = .25f;
     [SerializeField] private float maxFlightDuration = .6f;
     [SerializeField] private int arcSamples = 25;
-    [Tooltip("Swell at the start of the flight, relative to the item's size when it leaves the board.")]
-    [SerializeField] private float pulseFactor = 1.15f;
+    [Tooltip("Swell at the start of the flight, relative to the item's rack size.")]
+    [SerializeField] private float pulseFactor = 1.42f;
     [Tooltip("Part of the flight spent swelling; the rest shrinks into the slot.")]
     [SerializeField] private float pulseGrowPortion = .23f;
 
     [Header(" Rack Slides ")]
-    [Tooltip("Slides inside the rack. A one-slot shift (0.474 units) takes ~0.14s including the same-row x1.5.")]
-    [SerializeField] private float slideSecondsPerUnit = .2f;
+    [Tooltip("Slides inside the rack. A one-slot shift (1.29 units) takes ~0.11s including the same-row x1.5.")]
+    [SerializeField] private float slideSecondsPerUnit = .055f;
     [SerializeField] private float sameRowSlideMultiplier = 1.5f;
-    [Tooltip("Hop over each slot passed, in world +Z (up on screen).")]
-    [SerializeField] private float slideHopHeight = .12f;
+    [Tooltip("Hop over each slot passed, up on screen.")]
+    [SerializeField] private float slideHopHeight = .25f;
 
     [Header(" Landing ")]
     [Tooltip("Bounce strength per unit of depth the item travelled (capped at 1). Weaker than 0.15 = no bounce.")]
@@ -140,10 +149,10 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         
         if(itemSpots.Count >= 2)
         {
-            itemSpots.Sort((a, b) => b.transform.GetSiblingIndex().CompareTo(a.transform.GetSiblingIndex()));
+            itemSpots.Sort((a, b) => IndexOf(b).CompareTo(IndexOf(a)));
         }
 
-        int idealSpotIndex = itemSpots[0].transform.GetSiblingIndex() + 1;
+        int idealSpotIndex = IndexOf(itemSpots[0]) + 1;
 
         return spots[idealSpotIndex];
     }
@@ -169,7 +178,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     private void MoveItemsToRightFrom(ItemSpot idealSpot, Item itemToPlace)
     {
 
-        int spotIndex = idealSpot.transform.GetSiblingIndex();
+        int spotIndex = IndexOf(idealSpot);
 
         for (int i =  spots.Length - 2; i >= spotIndex; i--)
         {
@@ -369,30 +378,84 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         item.DisableShadows();
         item.DisablePhysics();
 
-        Vector3 target = item.transform.parent.TransformPoint(itemLocalPositionOnSpot);
+        // Board world size x the rack multiplier, as a local scale under the spot.
+        Vector3 rackScale = item.BaseScale * (GetBoardParentScale() * GetRackMultiplier(item) / targetSpot.ItemParentScale);
+        Vector3 seat = GetSeatLocalPosition(item, targetSpot);
+
+        Vector3 target = item.transform.parent.TransformPoint(seat);
         float depth = Mathf.Abs(target.z - start.z);
         targetSpot.SetLandingStrength(depth * bounceStrengthPerUnit, fromBoard);
 
         Action onArrived = () =>
         {
-            item.transform.localPosition = itemLocalPositionOnSpot;
+            item.transform.localPosition = seat;
             item.transform.localRotation = Quaternion.identity;
-            item.transform.localScale = itemLocalScaleOnSpot;
+            item.transform.localScale = rackScale;
             completeCallback?.Invoke();
         };
 
         if (fromBoard)
-            FlyToSpot(item, start, depth, onArrived);
+            FlyToSpot(item, start, seat, rackScale, depth, onArrived);
         else
-            SlideToSpot(item, start, onArrived);
+            SlideToSpot(item, start, seat, rackScale, onArrived);
+    }
+
+    // Rack size relative to the board size: rackBase when the item fits the
+    // fit box, smaller for an item too wide or too tall for it.
+    private float GetRackMultiplier(Item item)
+    {
+        Vector3 size = item.BoardBounds.size * GetBoardParentScale();
+        float boxScale = GetSlotWidth() / fitBoxSlotWidth;
+        float boxW = fitBox.x * boxScale, boxH = fitBox.y * boxScale;
+
+        float mult = rackBase;
+        if (size.x / boxW > size.y / boxH)
+        {
+            if (size.x > boxW)
+                mult = rackBase / (size.x / boxW);     // width-dominant, too wide
+        }
+        else if (size.y > boxH)
+            mult = rackBase / (size.y / boxH);         // height-dominant, too tall
+
+        return mult;
+    }
+
+    // World scale of the level's item parent (the board is scaled to the screen).
+    private static float GetBoardParentScale()
+    {
+        Transform board = LevelManager.instance != null ? LevelManager.instance.ItemParent : null;
+        return board != null ? board.lossyScale.x : 1f;
+    }
+
+    // World width of the slot art.
+    private float GetSlotWidth()
+    {
+        Renderer art = spots.Length > 0 ? spots[0].SlotRenderer : null;
+        return art != null ? art.bounds.size.x : fitBoxSlotWidth;
+    }
+
+    // The item's centre sits half its rack height up the screen from the
+    // slot's item point. Local to the spot's item parent, at rest.
+    private Vector3 GetSeatLocalPosition(Item item, ItemSpot spot)
+    {
+        // Board-local units to world units in the rack.
+        float toRack = GetBoardParentScale() * GetRackMultiplier(item);
+        Bounds bounds = item.BoardBounds;
+        ItemContainer container = containers[IndexOf(spot)];
+
+        Vector3 centre = container.GetSeatPosition(bounds.size.y * toRack * .5f);
+        // In the rack the item is upright in the item parent; move its pivot so the bounds centre lands on the seat.
+        Vector3 pivotToCentre = item.transform.parent.rotation * (bounds.center * toRack);
+
+        return spot.RestLocalPoint(centre - pivotToCentre);
     }
 
     // Arc from the board: lifts toward the camera, constant speed, upright
     // early, swells then shrinks into the slot.
-    private void FlyToSpot(Item item, Vector3 start, float depth, Action onArrived)
+    private void FlyToSpot(Item item, Vector3 start, Vector3 seat, Vector3 rackScale, float depth, Action onArrived)
     {
         Transform parent = item.transform.parent;
-        Vector3 target = parent.TransformPoint(itemLocalPositionOnSpot);
+        Vector3 target = parent.TransformPoint(seat);
         Vector3 ctrl = new Vector3((start.x + target.x) * .5f, start.y + arcLift, start.z + depth * arcBackPull);
 
         // Duration from the arc length.
@@ -412,30 +475,32 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         // case the rack moves.
         LeanTween.value(item.gameObject, 0f, 1f, duration)
             .setOnUpdate((float t) =>
-                item.transform.position = QuadraticBezier(start, ctrl, parent.TransformPoint(itemLocalPositionOnSpot), t))
+                item.transform.position = QuadraticBezier(start, ctrl, parent.TransformPoint(seat), t))
             .setOnComplete(onArrived);
 
         LeanTween.rotateLocal(item.gameObject, Vector3.zero, duration)
             .setEase(LeanTweenType.easeOutQuint);
 
         float grow = duration * pulseGrowPortion;
-        LeanTween.scale(item.gameObject, item.transform.localScale * pulseFactor, grow)
+        LeanTween.scale(item.gameObject, rackScale * pulseFactor, grow)
             .setEase(LeanTweenType.easeInOutSine);
-        LeanTween.scale(item.gameObject, itemLocalScaleOnSpot, duration - grow)
+        LeanTween.scale(item.gameObject, rackScale, duration - grow)
             .setDelay(grow)
             .setEase(LeanTweenType.easeInOutSine);
     }
 
     // Inside the rack: linear sideways, a small hop over every slot passed.
-    private void SlideToSpot(Item item, Vector3 start, Action onArrived)
+    private void SlideToSpot(Item item, Vector3 start, Vector3 seat, Vector3 rackScale, Action onArrived)
     {
         Transform parent = item.transform.parent;
-        Vector3 target = parent.TransformPoint(itemLocalPositionOnSpot);
+        Vector3 target = parent.TransformPoint(seat);
         float distance = Vector3.Distance(start, target);
 
         // Always the same row in this rack.
         float duration = Mathf.Max(.05f, distance * slideSecondsPerUnit * sameRowSlideMultiplier);
         int slotsPassed = Mathf.Max(1, Mathf.RoundToInt(distance / spotSpacing));
+
+        Vector3 hopDirection = CameraService.ScreenUp;
 
         // Slots strictly between start and target glint as the item passes over them.
         List<ItemSpot> passed = new List<ItemSpot>();
@@ -450,7 +515,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         LeanTween.value(item.gameObject, 0f, 1f, duration)
             .setOnUpdate((float t) =>
             {
-                Vector3 position = Vector3.Lerp(start, parent.TransformPoint(itemLocalPositionOnSpot), t);
+                Vector3 position = Vector3.Lerp(start, parent.TransformPoint(seat), t);
 
                 for (int i = passed.Count - 1; i >= 0; i--)
                 {
@@ -469,12 +534,12 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
                     : Mathf.Cos((u - .5f) * 2 * Mathf.PI * .5f);        // easeInSine down
                 if (t >= 1) height = 0;
 
-                item.transform.position = position + Vector3.forward * (height * slideHopHeight);
+                item.transform.position = position + hopDirection * (height * slideHopHeight);
             })
             .setOnComplete(onArrived);
 
         LeanTween.rotateLocal(item.gameObject, Vector3.zero, duration);
-        LeanTween.scale(item.gameObject, itemLocalScaleOnSpot, duration);
+        LeanTween.scale(item.gameObject, rackScale, duration);
     }
 
     private static Vector3 QuadraticBezier(Vector3 p0, Vector3 p1, Vector3 p2, float t)
@@ -535,14 +600,18 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
 
     private void StoreSpots()
     {
-        spots = new ItemSpot[itemSpotsParent.childCount];
+        containers = bottomPanel.ItemContainers;
+        spots = new ItemSpot[containers.Length];
 
-        for(int i = 0; i < itemSpotsParent.childCount; i++)
-            spots[i] = itemSpotsParent.GetChild(i).GetComponent<ItemSpot>();
+        for(int i = 0; i < containers.Length; i++)
+            spots[i] = containers[i].Spot;
 
         if (spots.Length >= 2)
             spotSpacing = Vector3.Distance(spots[0].transform.position, spots[1].transform.position);
     }
+
+    // Slot position in the rack, 0 = left-most.
+    private int IndexOf(ItemSpot spot) => Array.IndexOf(spots, spot);
 
     private bool IsFreeSpotAvailable()
     {

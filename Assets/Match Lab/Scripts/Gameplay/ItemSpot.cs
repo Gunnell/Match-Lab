@@ -21,11 +21,11 @@ public class ItemSpot : MonoBehaviour
     [Tooltip("Soft dark ellipse on the slot surface. Its alpha follows how close the nearest rack item is.")]
     [SerializeField] private SpriteRenderer contactShadow;
     [Tooltip("Items closer than this (world units, from the slot centre) get the full shadow.")]
-    [SerializeField] private float shadowNear = .24f;
+    [SerializeField] private float shadowNear = .65f;
     [Tooltip("Fade rate past shadowNear: the shadow is gone at shadowNear + 1 / shadowFalloff.")]
-    [SerializeField] private float shadowFalloff = 2.3f;
+    [SerializeField] private float shadowFalloff = .85f;
     [Tooltip("Only items within this sideways distance (world, along the rack) count, so a neighbour's item doesn't shade this slot.")]
-    [SerializeField] private float shadowHalfWidth = .25f;
+    [SerializeField] private float shadowHalfWidth = .68f;
     [SerializeField] private float shadowMaxAlpha = .35f;
     [Tooltip("Share of the gap closed per 60 Hz frame; gaps under shadowSnap are closed at once.")]
     [SerializeField] private float shadowSmoothing = .125f;
@@ -173,6 +173,22 @@ public class ItemSpot : MonoBehaviour
     }
 
     public bool IsEmpty() => item == null;
+
+    /// <summary>
+    /// <paramref name="world"/> in the item parent's local space, as if the parent
+    /// were at rest (any landing bounce or merge dip in progress is ignored).
+    /// </summary>
+    public Vector3 RestLocalPoint(Vector3 world)
+    {
+        Vector3 bounce = itemParent.position - itemParent.parent.TransformPoint(restPosition);
+        return itemParent.InverseTransformPoint(world + bounce);
+    }
+
+    /// <summary>World scale of the item parent (uniform).</summary>
+    public float ItemParentScale => itemParent.lossyScale.x;
+
+    /// <summary>The slot's own mesh.</summary>
+    public Renderer SlotRenderer => slotRenderer != null ? slotRenderer : itemParent.GetComponentInChildren<Renderer>(true);
 
     public void Clear()
     {
