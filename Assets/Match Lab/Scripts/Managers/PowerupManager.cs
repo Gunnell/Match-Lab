@@ -8,9 +8,8 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [Header(" Vacuum Elements")]
     [SerializeField] private Vacuum vacuum;
     [SerializeField] private Transform vacuumEndPosition;
-    [Tooltip("Delay between the tap and the items taking off.")]
     [SerializeField] private float vacuumFlightDelay = .25f;
-    [Tooltip("Optional, created at vacuumEndPosition when empty.")]
+    [SerializeField] private float vacuumFinishDelay = .2f;
     [SerializeField] private VacuumSuctionEffect vacuumSuction;
     [Tooltip("How long to wait for a busy rack before re-planning, then giving up with a refund.")]
     [SerializeField] private float vacuumRackWaitTimeout = 2f;
@@ -587,7 +586,10 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     {
          vacuumCounter++;
          if (vacuumCounter >= vacuumItemsToCollect)
+         {
              isVacuumBusy = false;
+             StartCoroutine(FinishVacuum());
+         }
 
          if (item == null)
              return;
@@ -597,6 +599,19 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
              itemPickedUp?.Invoke(item);
 
          Destroy(item.gameObject);
+    }
+
+    private System.Collections.IEnumerator FinishVacuum()
+    {
+        yield return new WaitForSeconds(vacuumFinishDelay);
+
+        // A new use started meanwhile.
+        if (isVacuumBusy)
+            yield break;
+
+        vacuum.Finish();
+        if (vacuumSuction != null)
+            vacuumSuction.Finish();
     }
 
     private void UpdateVacuumVisuals()

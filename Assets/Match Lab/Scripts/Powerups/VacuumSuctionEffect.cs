@@ -8,12 +8,11 @@ public class VacuumSuctionEffect : MonoBehaviour
     [SerializeField] private float startDelay = .43f;
     [SerializeField] private float holdTime = 1.34f;
     [SerializeField] private float shrinkTime = .76f;
+    [SerializeField] private float finishShrinkTime = .2f;
 
     [Header(" Look ")]
     [SerializeField] private float size = 1f;
-    [Tooltip("Optional, built in code when empty.")]
     [SerializeField] private Material dotMaterial;
-    [Tooltip("Optional, built in code when empty.")]
     [SerializeField] private Material ringMaterial;
 
     private Transform target;
@@ -51,14 +50,36 @@ public class VacuumSuctionEffect : MonoBehaviour
             foreach (ParticleSystem ps in systems)
                 ps.Play(false);
 
-            LeanTween.scale(gameObject, Vector3.zero, shrinkTime)
-                .setDelay(holdTime)
-                .setEase(LeanTweenType.easeOutSine)
-                .setOnComplete(() => StopEmitting(true));
+            Shrink(holdTime);
         });
     }
 
+    // Everything is in: no new streaks, quick shrink.
+    public void Finish()
+    {
+        LeanTween.cancel(gameObject);
+
+        if (transform.localScale == Vector3.zero)
+        {
+            StopEmitting(true);
+            return;
+        }
+
+        StopEmitting(false);
+        Shrink(0f, finishShrinkTime);
+    }
+
     public void Stop() => Cancel();
+
+    private void Shrink(float delay) => Shrink(delay, shrinkTime);
+
+    private void Shrink(float delay, float time)
+    {
+        LeanTween.scale(gameObject, Vector3.zero, time)
+            .setDelay(delay)
+            .setEase(LeanTweenType.easeOutSine)
+            .setOnComplete(() => StopEmitting(true));
+    }
 
     private void Cancel()
     {
