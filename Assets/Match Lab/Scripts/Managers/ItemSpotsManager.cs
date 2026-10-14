@@ -25,8 +25,21 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     [Tooltip("Pose of rack items relative to the camera (X right, Y up, Z away from the camera), whatever the slot's own tilt. "
         + "Tipped toward the camera and turned a little, so they read as 3D rather than flat icons.")]
     [SerializeField] private Vector3 rackItemRotation = new Vector3(-16.6f, -13f, 3.8f);
+    // Merge, compaction or release in progress.
     private bool isBusy;
-    public bool IsBusy => isBusy;
+    private readonly HashSet<Item> movingItems = new HashSet<Item>();
+    private readonly List<Item> pendingTaps = new List<Item>();
+    private bool compactionPending;
+    public bool IsBusy => isBusy || movingItems.Count > 0 || pendingTaps.Count > 0;
+    // Board flights, so a pushed item can be re-aimed mid-air.
+    private readonly Dictionary<Item, RackTarget> flightTargets = new Dictionary<Item, RackTarget>();
+
+    private class RackTarget
+    {
+        public Transform parent;
+        public Vector3 seat;
+        public float depth;
+    }
     // A full rack doesn't end the level while a booster is about to free it.
     private bool gameOverHeld;
 
@@ -56,6 +69,10 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     [Tooltip("Hop over each slot passed, up on screen.")]
     [SerializeField] private float slideHopHeight = .25f;
 
+    [Header(" Rack Full ")]
+    [SerializeField] private float fullHopSideForce = 300f;
+    [SerializeField] private Vector2 fullHopUpForce = new Vector2(250, 350);
+
     [Header(" Landing ")]
     [Tooltip("Bounce strength per unit of depth the item travelled (capped at 1). Weaker than 0.15 = no bounce.")]
     [SerializeField] private float bounceStrengthPerUnit = .2f;
@@ -68,9 +85,6 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     [SerializeField] private float warningStopFade = .25f;
     private bool isMergeRunning;
 
-    // One tap is buffered while the rack is animating, so fast taps aren't
-    // dropped. It is processed (and only then counted) once the rack is free.
-    private Item bufferedItem;
     private float spotSpacing = .5f;
 
     [Header(" Actions ")]
@@ -96,32 +110,75 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         MergeManager.mergeCompleted -= OnMergeCompleted;
     }
     
-    private void OnItemClicked(Item item){
+    private void OnItemClicked(Item item)
+    {
+        if (item.Spot != null || pendingTaps.Contains(item))
+            return;
 
-        if (isBusy)
+        // Rack full.
+        if (FreeSpotCount() - pendingTaps.Count <= 0)
         {
-            // The latest tap replaces an older one.
-            bufferedItem = item;
+            HopInPlace(item);
             return;
         }
 
-        if(!IsFreeSpotAvailable()){
-            Debug.LogWarning("No free item spot available!");
+        if (isBusy || pendingTaps.Count > 0 || !CanPlaceNow(item))
+        {
+            pendingTaps.Add(item);
             return;
         }
 
-        isBusy = true;
+        Place(item);
+    }
+
+    private void Place(Item item)
+    {
         item.StoreBoardPose();
-        
+
         itemPickedUp?.Invoke(item);
 
         HandleItemClicked(item);
 
         // The item now holds a slot, so the rack count changed.
         UpdateLastSpaceWarning();
-            
+    }
 
-    }  
+    private bool CanPlaceNow(Item item)
+    {
+        if (!itemMergeDataDictionary.ContainsKey(item.ItemName))
+            return true;
+
+        if (itemMergeDataDictionary[item.ItemName].CanMergeItems())
+            return false;
+
+        ItemSpot idealSpot = GetIdealSpot(item);
+        if (idealSpot == null)
+            return false;
+
+        if (idealSpot.IsEmpty())
+            return true;
+
+        // Flying items can be re-aimed, sliding ones can't.
+        for (int i = IndexOf(idealSpot); i < spots.Length; i++)
+        {
+            Item other = spots[i].Item;
+            if (other != null && movingItems.Contains(other) && !flightTargets.ContainsKey(other))
+                return false;
+        }
+
+        return true;
+    }
+
+    private void HopInPlace(Item item)
+    {
+        Rigidbody rb = item.GetComponent<Rigidbody>();
+        if (rb == null || rb.isKinematic)
+            return;
+
+        float angle = UnityEngine.Random.Range(0, 360) * Mathf.Deg2Rad;
+        float up = UnityEngine.Random.Range((int)fullHopUpForce.x, (int)fullHopUpForce.y);
+        rb.AddForce(new Vector3(Mathf.Cos(angle) * fullHopSideForce, up, Mathf.Sin(angle) * fullHopSideForce), ForceMode.Force);
+    }
 
     private void HandleItemClicked(Item item)
     {
@@ -159,7 +216,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
 
         int idealSpotIndex = IndexOf(itemSpots[0]) + 1;
 
-        return spots[idealSpotIndex];
+        return idealSpotIndex < spots.Length ? spots[idealSpotIndex] : null;
     }
 
     private void MoveItemToIdealSpot(Item item, ItemSpot idealSpot)
@@ -205,6 +262,14 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
                 return;
             }
 
+            if (flightTargets.TryGetValue(itemOnTheSpot, out RackTarget flight))
+            {
+                targetSpot.Populate(itemOnTheSpot);
+                flight.parent = itemOnTheSpot.transform.parent;
+                flight.seat = GetSeatLocalPosition(itemOnTheSpot, targetSpot, GetRackLocalRotation(itemOnTheSpot, targetSpot));
+                targetSpot.SetLandingStrength(flight.depth * bounceStrengthPerUnit, true);
+                continue;
+            }
 
             MoveItemToSpot(itemOnTheSpot, targetSpot, () => HandleItemReachedSpot(itemOnTheSpot, false));
 
@@ -217,13 +282,91 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     private void HandleItemReachedSpot(Item item, bool checkForMerge = true)
     {
         item.Spot.BumpDown();
-        if(!checkForMerge)
+    }
+
+    private void AfterArrival()
+    {
+        if (isBusy)
+        {
+            if (compactionPending && movingItems.Count == 0)
+            {
+                compactionPending = false;
+                MoveAllItemsToLeft(HandleAllItemsMovedToTheLeft);
+            }
+            return;
+        }
+
+        if (TryStartMerge())
             return;
 
-        if (itemMergeDataDictionary[item.ItemName].CanMergeItems())
-            MergeItems(itemMergeDataDictionary[item.ItemName]);
-        else
-            CheckForGameover();
+        ProcessPendingTaps();
+        Settle();
+    }
+
+    private bool TryStartMerge()
+    {
+        foreach (ItemMergeData data in itemMergeDataDictionary.Values)
+        {
+            if (!data.CanMergeItems())
+                continue;
+
+            bool landed = true;
+            foreach (Item groupItem in data.items)
+                if (movingItems.Contains(groupItem))
+                    landed = false;
+
+            if (!landed)
+                continue;
+
+            MergeItems(data);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ProcessPendingTaps()
+    {
+        while (pendingTaps.Count > 0 && !isBusy)
+        {
+            Item item = pendingTaps[0];
+
+            bool valid = item != null && item.Spot == null && item.IsPhysicsEnabled && !item.IsBeingThrown
+                && GameManager.instance.IsGame();
+
+            if (!valid)
+            {
+                pendingTaps.RemoveAt(0);
+                continue;
+            }
+
+            if (!IsFreeSpotAvailable())
+            {
+                pendingTaps.RemoveAt(0);
+                HopInPlace(item);
+                continue;
+            }
+
+            if (!CanPlaceNow(item))
+                break;
+
+            pendingTaps.RemoveAt(0);
+            Place(item);
+        }
+    }
+
+    private void Settle()
+    {
+        if (IsBusy)
+            return;
+
+        if (GetFreeSpot() == null && !gameOverHeld && GameManager.instance.IsGame())
+        {
+            GameManager.instance.SetGameState(EGameState.GAMEOVER);
+            return;
+        }
+
+        UpdateLastSpaceWarning();
     }
 
     private void MergeItems(ItemMergeData itemMergeData)
@@ -232,6 +375,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         itemMergeDataDictionary.Remove(itemMergeData.itemName);
 
         // A match is happening: no warning.
+        isBusy = true;
         isMergeRunning = true;
         UpdateLastSpaceWarning();
 
@@ -292,10 +436,14 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     {
         isMergeRunning = false;
 
-        if (itemMergeDataDictionary.Count <= 0)
-            SetNotBusy();
-        else
-            MoveAllItemsToLeft(HandleAllItemsMovedToTheLeft);
+        // Compact once in-flight items have landed.
+        if (movingItems.Count > 0)
+        {
+            compactionPending = true;
+            return;
+        }
+
+        MoveAllItemsToLeft(HandleAllItemsMovedToTheLeft);
     }
 
     private void HandleAllItemsMovedToTheLeft()
@@ -303,23 +451,15 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         SetNotBusy();
     }
 
-    // The single place the rack becomes free. Fires a buffered tap if it is
-    // still a valid pick (not vacuumed, re-picked or mid-flight; level running).
     private void SetNotBusy()
     {
         isBusy = false;
 
-        Item item = bufferedItem;
-        bufferedItem = null;
+        if (TryStartMerge())
+            return;
 
-        bool bufferValid = item != null && item.Spot == null && item.IsPhysicsEnabled && !item.IsBeingThrown
-            && GameManager.instance.IsGame();
-
-        if (bufferValid)
-            OnItemClicked(item);
-
-        // The rack has settled (or a buffered tap just refilled it).
-        UpdateLastSpaceWarning();
+        ProcessPendingTaps();
+        Settle();
     }
 
     // Pulse the empty last slot when the rack holds 6 items and no match is
@@ -340,7 +480,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
 
         if (!danger)
             lastSpot.StopWarning(warningStopFade);
-        else if (!isBusy && !lastSpot.IsWarning)
+        else if (!IsBusy && !lastSpot.IsWarning)
             lastSpot.StartWarning(warningColor, warningHalfPeriod);
     }
 
@@ -392,16 +532,25 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         float depth = Mathf.Abs(target.z - start.z);
         targetSpot.SetLandingStrength(depth * bounceStrengthPerUnit, fromBoard);
 
+        movingItems.Add(item);
+
+        RackTarget rackTarget = new RackTarget { parent = item.transform.parent, seat = seat, depth = depth };
+        if (fromBoard)
+            flightTargets[item] = rackTarget;
+
         Action onArrived = () =>
         {
-            item.transform.localPosition = seat;
+            flightTargets.Remove(item);
+            item.transform.localPosition = rackTarget.seat;
             item.transform.localRotation = rackRotation;
             item.transform.localScale = rackScale;
+            movingItems.Remove(item);
             completeCallback?.Invoke();
+            AfterArrival();
         };
 
         if (fromBoard)
-            FlyToSpot(item, start, seat, rackRotation, rackScale, depth, onArrived);
+            FlyToSpot(item, start, rackTarget, rackRotation, rackScale, depth, onArrived);
         else
             SlideToSpot(item, start, seat, rackRotation, rackScale, onArrived);
     }
@@ -466,10 +615,9 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
 
     // Arc from the board: lifts toward the camera, constant speed, upright
     // early, swells then shrinks into the slot.
-    private void FlyToSpot(Item item, Vector3 start, Vector3 seat, Quaternion rackRotation, Vector3 rackScale, float depth, Action onArrived)
+    private void FlyToSpot(Item item, Vector3 start, RackTarget rackTarget, Quaternion rackRotation, Vector3 rackScale, float depth, Action onArrived)
     {
-        Transform parent = item.transform.parent;
-        Vector3 target = parent.TransformPoint(seat);
+        Vector3 target = rackTarget.parent.TransformPoint(rackTarget.seat);
         Vector3 ctrl = new Vector3((start.x + target.x) * .5f, start.y + arcLift, start.z + depth * arcBackPull);
 
         // Duration from the arc length.
@@ -489,7 +637,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         // case the rack moves.
         LeanTween.value(item.gameObject, 0f, 1f, duration)
             .setOnUpdate((float t) =>
-                item.transform.position = QuadraticBezier(start, ctrl, parent.TransformPoint(seat), t))
+                item.transform.position = QuadraticBezier(start, ctrl, rackTarget.parent.TransformPoint(rackTarget.seat), t))
             .setOnComplete(onArrived);
 
         RotateLocal(item, rackRotation, duration, LeanTweenType.easeOutQuint);
@@ -596,15 +744,6 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     private void HandleFirstItemReachedSpot(Item item)
     {
         item.Spot.BumpDown();
-        CheckForGameover();
-    }
-
-    private void CheckForGameover()
-    {
-        if(GetFreeSpot() == null && !gameOverHeld)
-            GameManager.instance.SetGameState(EGameState.GAMEOVER);
-        else
-            SetNotBusy();
     }
 
     // Released: a rack that is still full now ends the level.
@@ -612,7 +751,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     {
         gameOverHeld = hold;
 
-        if (!hold && !isBusy && GetFreeSpot() == null && GameManager.instance.IsGame())
+        if (!hold && !IsBusy && GetFreeSpot() == null && GameManager.instance.IsGame())
             GameManager.instance.SetGameState(EGameState.GAMEOVER);
     }
 
@@ -644,6 +783,15 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     // Slot position in the rack, 0 = left-most.
     private int IndexOf(ItemSpot spot) => Array.IndexOf(spots, spot);
 
+    private int FreeSpotCount()
+    {
+        int free = 0;
+        for (int i = 0; i < spots.Length; i++)
+            if (spots[i].IsEmpty())
+                free++;
+        return free;
+    }
+
     private bool IsFreeSpotAvailable()
     {
         for(int i = 0; i < spots.Length; i++)
@@ -657,7 +805,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
 
     public Item ReleaseLastItemOnRack()
     {
-        if (isBusy)
+        if (IsBusy)
         {
             Debug.LogWarning("ItemSpotsManager is busy!");
             return null;
@@ -698,7 +846,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     // No itemPickedUp: these items were counted when they entered the rack.
     public bool TryReleaseItems(List<Item> items)
     {
-        if (isBusy)
+        if (IsBusy)
             return false;
 
         for (int i = 0; i < items.Count; i++)
