@@ -22,6 +22,9 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     [SerializeField] private float fitBoxSlotWidth = 1.28f;
     [Tooltip("Rack size relative to the board size, for items that fit the box.")]
     [SerializeField] private float rackBase = .65f;
+    [Tooltip("Pose of rack items relative to the camera (X right, Y up, Z away from the camera), whatever the slot's own tilt. "
+        + "Tipped toward the camera and turned a little, so they read as 3D rather than flat icons.")]
+    [SerializeField] private Vector3 rackItemRotation = new Vector3(-16.6f, -13f, 3.8f);
     private bool isBusy;
     public bool IsBusy => isBusy;
 
@@ -380,7 +383,8 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
 
         // Board world size x the rack multiplier, as a local scale under the spot.
         Vector3 rackScale = item.BaseScale * (GetBoardParentScale() * GetRackMultiplier(item) / targetSpot.ItemParentScale);
-        Vector3 seat = GetSeatLocalPosition(item, targetSpot);
+        Quaternion rackRotation = GetRackLocalRotation(item, targetSpot);
+        Vector3 seat = GetSeatLocalPosition(item, targetSpot, rackRotation);
 
         Vector3 target = item.transform.parent.TransformPoint(seat);
         float depth = Mathf.Abs(target.z - start.z);
@@ -389,15 +393,23 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         Action onArrived = () =>
         {
             item.transform.localPosition = seat;
-            item.transform.localRotation = Quaternion.identity;
+            item.transform.localRotation = rackRotation;
             item.transform.localScale = rackScale;
             completeCallback?.Invoke();
         };
 
         if (fromBoard)
-            FlyToSpot(item, start, seat, rackScale, depth, onArrived);
+            FlyToSpot(item, start, seat, rackRotation, rackScale, depth, onArrived);
         else
-            SlideToSpot(item, start, seat, rackScale, onArrived);
+            SlideToSpot(item, start, seat, rackRotation, rackScale, onArrived);
+    }
+
+    // rackItemRotation (camera-relative) as a local rotation under the spot's
+    // item parent. The slot container faces the camera.
+    private Quaternion GetRackLocalRotation(Item item, ItemSpot spot)
+    {
+        Quaternion cameraFacing = containers[IndexOf(spot)].transform.rotation;
+        return Quaternion.Inverse(item.transform.parent.rotation) * cameraFacing * Quaternion.Euler(rackItemRotation);
     }
 
     // Rack size relative to the board size: rackBase when the item fits the
@@ -436,7 +448,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
 
     // The item's centre sits half its rack height up the screen from the
     // slot's item point. Local to the spot's item parent, at rest.
-    private Vector3 GetSeatLocalPosition(Item item, ItemSpot spot)
+    private Vector3 GetSeatLocalPosition(Item item, ItemSpot spot, Quaternion rackRotation)
     {
         // Board-local units to world units in the rack.
         float toRack = GetBoardParentScale() * GetRackMultiplier(item);
@@ -444,15 +456,15 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         ItemContainer container = containers[IndexOf(spot)];
 
         Vector3 centre = container.GetSeatPosition(bounds.size.y * toRack * .5f);
-        // In the rack the item is upright in the item parent; move its pivot so the bounds centre lands on the seat.
-        Vector3 pivotToCentre = item.transform.parent.rotation * (bounds.center * toRack);
+        // Move the item's pivot so its bounds centre (at the rack pose) lands on the seat.
+        Vector3 pivotToCentre = item.transform.parent.rotation * rackRotation * (bounds.center * toRack);
 
         return spot.RestLocalPoint(centre - pivotToCentre);
     }
 
     // Arc from the board: lifts toward the camera, constant speed, upright
     // early, swells then shrinks into the slot.
-    private void FlyToSpot(Item item, Vector3 start, Vector3 seat, Vector3 rackScale, float depth, Action onArrived)
+    private void FlyToSpot(Item item, Vector3 start, Vector3 seat, Quaternion rackRotation, Vector3 rackScale, float depth, Action onArrived)
     {
         Transform parent = item.transform.parent;
         Vector3 target = parent.TransformPoint(seat);
@@ -478,8 +490,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
                 item.transform.position = QuadraticBezier(start, ctrl, parent.TransformPoint(seat), t))
             .setOnComplete(onArrived);
 
-        LeanTween.rotateLocal(item.gameObject, Vector3.zero, duration)
-            .setEase(LeanTweenType.easeOutQuint);
+        RotateLocal(item, rackRotation, duration, LeanTweenType.easeOutQuint);
 
         float grow = duration * pulseGrowPortion;
         LeanTween.scale(item.gameObject, rackScale * pulseFactor, grow)
@@ -490,7 +501,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     }
 
     // Inside the rack: linear sideways, a small hop over every slot passed.
-    private void SlideToSpot(Item item, Vector3 start, Vector3 seat, Vector3 rackScale, Action onArrived)
+    private void SlideToSpot(Item item, Vector3 start, Vector3 seat, Quaternion rackRotation, Vector3 rackScale, Action onArrived)
     {
         Transform parent = item.transform.parent;
         Vector3 target = parent.TransformPoint(seat);
@@ -538,8 +549,17 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
             })
             .setOnComplete(onArrived);
 
-        LeanTween.rotateLocal(item.gameObject, Vector3.zero, duration);
+        RotateLocal(item, rackRotation, duration, LeanTweenType.linear);
         LeanTween.scale(item.gameObject, rackScale, duration);
+    }
+
+    // Shortest-path rotation to a local pose (an Euler tween could spin the long way round).
+    private static void RotateLocal(Item item, Quaternion target, float duration, LeanTweenType ease)
+    {
+        Quaternion from = item.transform.localRotation;
+        LeanTween.value(item.gameObject, 0f, 1f, duration)
+            .setEase(ease)
+            .setOnUpdate((float t) => item.transform.localRotation = Quaternion.SlerpUnclamped(from, target, t));
     }
 
     private static Vector3 QuadraticBezier(Vector3 p0, Vector3 p1, Vector3 p2, float t)

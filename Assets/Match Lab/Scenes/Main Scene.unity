@@ -6598,7 +6598,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.79, y: 0.79, z: 0.79}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 1
   m_Children: []
   m_Father: {fileID: 1784759895}
@@ -12122,9 +12122,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ItemSpotsManager
   bottomPanel: {fileID: 4908531285313324527}
-  fitBox: {x: 1.5, y: 2.25}
+  fitBox: {x: 1.5, y: 1.9}
   fitBoxSlotWidth: 1.28
   rackBase: 0.75
+  rackItemRotation: {x: -16.6, y: -13, z: 3.8}
   arcLift: 9.5
   arcBackPull: 0.25
   flightSecondsPerUnit: 0.0325
