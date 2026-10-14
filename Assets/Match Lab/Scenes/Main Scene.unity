@@ -12370,10 +12370,12 @@ MonoBehaviour:
   springForwardForce: 275
   springForwardMultiplier: 2.15
   springTorqueRange: {x: 40, y: 120}
+  springTorqueScale: 1
   springForceScale: 1
   springExtraFall: 1500
-  springFallMultiplier: 1
+  springFallMultiplier: 0
   springFallDuration: 1.5
+  springFallStartZ: -4.2
   springDampingPerFrame: 0.045
   springDampingDuration: 1
   springBoardEnterFallback: 1.5
@@ -12381,7 +12383,7 @@ MonoBehaviour:
   springSlotFlashIn: 0.133
   springSlotFlashOut: 0.133
   springSlotBurstPrefab: {fileID: 7876928622971659987, guid: 1132ea3f15a564b4a9a35ba7de7dbf13, type: 3}
-  springSlotBurstOffset: {x: 0, y: 0.56, z: 0.36}
+  springSlotBurstOffset: {x: 0, y: 0.57, z: 0.36}
   fan: {fileID: 1954245270}
   fanSpeedMultiplier: 1
   fanWindStartTime: 0.33

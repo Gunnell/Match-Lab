@@ -46,7 +46,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private float springSpeedMultiplier = 1f;
     [Tooltip("Where the item appears and is launched from. Falls back to the Spring button.")]
     [SerializeField] private Transform springLaunchPoint;
-    [Tooltip("Aim point for the throw. Falls back to straight ahead (+z).")]
+    [Tooltip("Board centre for the edge check. The throw itself always goes straight up the board (+z).")]
     [SerializeField] private Transform springBoardCenter;
     [Tooltip("Board wall between the button and the board; the thrown item passes through it until it is inside the board. "
         + "Falls back to the board's front wall (BoardService.ThrowCollider).")]
@@ -65,12 +65,31 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private float springForwardForce = 275f;
     [SerializeField] private float springForwardMultiplier = 2.15f;
     [SerializeField] private Vector2 springTorqueRange = new Vector2(40, 120);
+    [Tooltip("Scales the launch spin.")]
+    [SerializeField] private float springTorqueScale = 1f;
+    [Tooltip("Fling the item onto a random spot of the board on an exact arc. Off = the free physics throw below.")]
+    [SerializeField] private bool springAimRandomSpot = true;
+    [Tooltip("Random spots stay this far inside the board walls.")]
+    [SerializeField] private float springTargetMargin = 1.2f;
+    [Tooltip("Lands this far above the top of the pile at the spot (about half an item).")]
+    [SerializeField] private float springTargetLift = .4f;
+    [Tooltip("How far the arc rises above the higher of the launch point and the landing spot.")]
+    [SerializeField] private float springApexHeight = 1.5f;
+    [Tooltip("Gravity during the fling. Higher = snappier, shorter flight.")]
+    [SerializeField] private float springThrowGravity = 30f;
+    [Tooltip("Random spin, radians per second.")]
+    [SerializeField] private Vector2 springSpinRange = new Vector2(2f, 5f);
+    [Tooltip("Damping right after landing, so round items don't roll far from their spot.")]
+    [SerializeField] private float springLandingDamping = 4f;
+    [SerializeField] private float springLandingDampingTime = .5f;
     [Tooltip("Scales the launch forces (and the extra fall). Tuned so the item clears the front lip and lands around the middle of the board.")]
     [SerializeField] private float springForceScale = 1f;
     [Tooltip("Extra downward pull after launch so the item lands quickly.")]
     [SerializeField] private float springExtraFall = 1500f;
     [SerializeField] private float springFallMultiplier = 1f;
     [SerializeField] private float springFallDuration = 1.5f;
+    [Tooltip("No extra fall while the item is in front of this world Z, so it lobs over the front of the board before dropping.")]
+    [SerializeField] private float springFallStartZ = -4.2f;
     [Tooltip("Added to linear damping every frame for springDampingDuration, so the item settles instead of skidding.")]
     [SerializeField] private float springDampingPerFrame = .045f;
     [SerializeField] private float springDampingDuration = 1f;
@@ -84,7 +103,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [Tooltip("Burst where the item vanished. Should destroy itself when done.")]
     [SerializeField] private ParticleSystem springSlotBurstPrefab;
     [Tooltip("Burst position relative to the slot: X along the rack, Y toward the camera, Z up on screen.")]
-    [SerializeField] private Vector3 springSlotBurstOffset = new Vector3(0, .56f, .36f);
+    [SerializeField] private Vector3 springSlotBurstOffset = new Vector3(0, .57f, .36f);
 
     [Header(" Fan Elements ")]
     [SerializeField] private Fan fan;
@@ -753,9 +772,6 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
             return false;
         }
 
-        // Not itemPickedUp: the goal count goes back up instead.
-        itemBackToGame?.Invoke(itemToRelease);
-
         StartCoroutine(SpringThrowSequence(itemToRelease, fromSpot));
 
         return true;
@@ -810,6 +826,9 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
 
         // TODO: launch sound + haptic once there is an audio system.
 
+        // Not itemPickedUp: the goal count goes back up, at launch.
+        itemBackToGame?.Invoke(item);
+
         item.Show();
         item.EnablePhysics();
         item.EnableShadows();
@@ -823,37 +842,38 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
 
         item.BeginThrow(springThrowCollider != null ? springThrowCollider
             : BoardService.Instance != null ? BoardService.Instance.ThrowCollider : null);
-        LaunchSpringItem(rb);
+        int throwId = item.ThrowId;
 
-        StartCoroutine(SpringExtraFall(item, rb));
-        StartCoroutine(SpringDamping(item, rb));
-        StartCoroutine(SpringBoardEnterFallback(item));
+        if (springAimRandomSpot)
+        {
+            float flightTime = FlingSpringItemToRandomSpot(item, rb);
+            StartCoroutine(SpringThrowGravity(item, rb, flightTime, throwId));
+        }
+        else
+        {
+            LaunchSpringItem(rb);
+            StartCoroutine(SpringExtraFall(item, rb, throwId));
+            StartCoroutine(SpringDamping(item, rb, throwId));
+        }
+
+        StartCoroutine(SpringBoardEnterFallback(item, throwId));
 
         // Free at launch, not at landing, so the next Spring can go right away.
         InputManager.Unlock();
         isSpringBusy = false;
     }
 
-    // Mostly up and into the board, with a little random sideways drift that
-    // is pushed back toward the middle near the board's side edges.
+    // Up and straight into the board (+z), with a little random sideways drift
+    // that is pushed back toward the middle near the board's side edges.
     private void LaunchSpringItem(Rigidbody rb)
     {
         // The transform, not rb.position: the item was just moved to the launch
         // point and the body still holds its old rack pose until the next sync.
         Vector3 launchPos = rb.transform.position;
         Vector3 forward = Vector3.forward;
-
-        if (springBoardCenter != null)
-        {
-            Vector3 toCenter = springBoardCenter.position - launchPos;
-            toCenter.y = 0;
-            if (toCenter.sqrMagnitude > .0001f)
-                forward = toCenter.normalized;
-        }
-
-        Vector3 right = Vector3.Cross(Vector3.up, forward);
-        Vector3 center = springBoardCenter != null ? springBoardCenter.position : launchPos;
-        float lateral = Vector3.Dot(launchPos - center, right);
+        Vector3 right = Vector3.right;
+        float centerX = springBoardCenter != null ? springBoardCenter.position.x : 0f;
+        float lateral = launchPos.x - centerX;
 
         float side = UnityEngine.Random.Range(0f, springSideRandom) * springSideMultiplier;
         int dir;
@@ -879,7 +899,85 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
 
         // ForceMode.Force applied once, as with the Fan.
         rb.AddForce(force * springForceScale, ForceMode.Force);
-        rb.AddTorque(torque * springForceScale, ForceMode.Force);
+        rb.AddTorque(torque * springTorqueScale, ForceMode.Force);
+    }
+
+    // Picks a random spot on the board and sets the launch velocity so the
+    // item lands exactly there under springThrowGravity. Returns the flight time.
+    private float FlingSpringItemToRandomSpot(Item item, Rigidbody rb)
+    {
+        Vector3 start = rb.transform.position;
+        Vector3 target = PickSpringTarget(item);
+        float g = springThrowGravity;
+
+        float apexY = Mathf.Max(start.y, target.y) + springApexHeight;
+        float upSpeed = Mathf.Sqrt(2f * g * (apexY - start.y));
+        float flightTime = upSpeed / g + Mathf.Sqrt(2f * (apexY - target.y) / g);
+
+        Vector3 flat = target - start;
+        flat.y = 0;
+
+        rb.linearDamping = 0;
+        rb.linearVelocity = flat / flightTime + Vector3.up * upSpeed;
+        rb.angularVelocity = UnityEngine.Random.onUnitSphere
+            * (UnityEngine.Random.Range(springSpinRange.x, springSpinRange.y) * springTorqueScale);
+
+        return flightTime;
+    }
+
+    // A random point inside the board, raised to the top of whatever lies there.
+    private Vector3 PickSpringTarget(Item item)
+    {
+        Vector3 center = BoardService.Instance != null ? BoardService.Instance.transform.position : Vector3.zero;
+        float halfX = BoardService.Width * .5f - springTargetMargin;
+        float halfZ = BoardService.Depth * .5f - springTargetMargin;
+
+        Vector3 target = center + new Vector3(UnityEngine.Random.Range(-halfX, halfX), 0, UnityEngine.Random.Range(-halfZ, halfZ));
+        float top = center.y;
+
+        // Highest surface under the spot that isn't the thrown item (pile or floor).
+        Ray ray = new Ray(new Vector3(target.x, center.y + 30f, target.z), Vector3.down);
+        foreach (RaycastHit hit in Physics.RaycastAll(ray, 60f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+        {
+            if (hit.collider.transform.IsChildOf(item.transform))
+                continue;
+
+            top = Mathf.Max(top, hit.point.y);
+        }
+
+        target.y = top + springTargetLift;
+        return target;
+    }
+
+    // Extra gravity for the fling, so the arc matches the one it was aimed with.
+    private System.Collections.IEnumerator SpringThrowGravity(Item item, Rigidbody rb, float flightTime, int throwId)
+    {
+        float extra = springThrowGravity + Physics.gravity.y;
+        float timer = 0;
+
+        while (timer < flightTime)
+        {
+            if (!IsFreeOnBoard(item, throwId))
+                yield break;
+
+            rb.AddForce(Vector3.down * extra, ForceMode.Acceleration);
+            yield return new WaitForFixedUpdate();
+            timer += Time.fixedDeltaTime;
+        }
+
+        // Landed: brake briefly so it stays near the spot.
+        float linear = rb.linearDamping, angular = rb.angularDamping;
+        rb.linearDamping = springLandingDamping;
+        rb.angularDamping = springLandingDamping;
+
+        yield return new WaitForSeconds(springLandingDampingTime);
+
+        // Restored even after a newer throw: the fling itself flies undamped.
+        if (rb != null)
+        {
+            rb.linearDamping = linear;
+            rb.angularDamping = angular;
+        }
     }
 
     private Vector3 SlotBurstOffset()
@@ -893,11 +991,13 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         return UnityEngine.Random.value < .5f ? -value : value;
     }
 
-    // Still a free item on the board (not destroyed, vacuumed or re-picked).
-    private static bool IsFreeOnBoard(Item item)
-        => item != null && item.gameObject.activeInHierarchy && item.Spot == null && item.IsPhysicsEnabled;
+    // Still a free item on the board (not destroyed, vacuumed or re-picked)
+    // and not thrown again since.
+    private static bool IsFreeOnBoard(Item item, int throwId)
+        => item != null && item.gameObject.activeInHierarchy && item.Spot == null && item.IsPhysicsEnabled
+        && item.ThrowId == throwId;
 
-    private System.Collections.IEnumerator SpringExtraFall(Item item, Rigidbody rb)
+    private System.Collections.IEnumerator SpringExtraFall(Item item, Rigidbody rb, int throwId)
     {
         float timer = 0;
 
@@ -905,24 +1005,31 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         {
             yield return new WaitForFixedUpdate();
 
-            if (!IsFreeOnBoard(item))
+            if (!IsFreeOnBoard(item, throwId))
                 yield break;
 
-            rb.AddForce(Vector3.down * (springExtraFall * Time.fixedDeltaTime * springFallMultiplier * springForceScale), ForceMode.Force);
             timer += Time.fixedDeltaTime;
+
+            if (rb.position.z < springFallStartZ)
+                continue;
+
+            rb.AddForce(Vector3.down * (springExtraFall * Time.fixedDeltaTime * springFallMultiplier * springForceScale), ForceMode.Force);
         }
     }
 
-    private System.Collections.IEnumerator SpringDamping(Item item, Rigidbody rb)
+    private System.Collections.IEnumerator SpringDamping(Item item, Rigidbody rb, int throwId)
     {
-        float originalDamping = rb.linearDamping;
         float timer = 0;
 
         while (timer < springDampingDuration)
         {
             yield return null;
 
-            if (!IsFreeOnBoard(item))
+            // A newer throw owns the damping now.
+            if (item != null && item.ThrowId != throwId)
+                yield break;
+
+            if (!IsFreeOnBoard(item, throwId))
                 break;
 
             rb.linearDamping += springDampingPerFrame;
@@ -930,14 +1037,14 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         }
 
         if (rb != null)
-            rb.linearDamping = originalDamping;
+            rb.linearDamping = 0;
     }
 
-    private System.Collections.IEnumerator SpringBoardEnterFallback(Item item)
+    private System.Collections.IEnumerator SpringBoardEnterFallback(Item item, int throwId)
     {
         yield return new WaitForSeconds(springBoardEnterFallback);
 
-        if (item != null)
+        if (item != null && item.ThrowId == throwId)
             item.EndThrow();
     }
 

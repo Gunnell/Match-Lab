@@ -32,6 +32,8 @@ public class Item : MonoBehaviour
     // ignores until it is inside the board (or a fallback timer ends it).
     private Collider ignoredThrowCollider;
     public bool IsBeingThrown { get; private set; }
+    // Bumped on every throw, so timers from an older throw leave a newer one alone.
+    public int ThrowId { get; private set; }
     // [SerializeField] private Collider collider;
 
     private void Awake()
@@ -138,6 +140,7 @@ public class Item : MonoBehaviour
     public void BeginThrow(Collider throwCollider)
     {
         IsBeingThrown = true;
+        ThrowId++;
 
         if (throwCollider == null)
             return;
