@@ -27,6 +27,8 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     [SerializeField] private Vector3 rackItemRotation = new Vector3(-16.6f, -13f, 3.8f);
     private bool isBusy;
     public bool IsBusy => isBusy;
+    // A full rack doesn't end the level while a booster is about to free it.
+    private bool gameOverHeld;
 
     [Header(" Data ")]
     private Dictionary<EItemName, ItemMergeData> itemMergeDataDictionary = new Dictionary<EItemName, ItemMergeData>();
@@ -599,10 +601,19 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
 
     private void CheckForGameover()
     {
-        if(GetFreeSpot() == null)
+        if(GetFreeSpot() == null && !gameOverHeld)
             GameManager.instance.SetGameState(EGameState.GAMEOVER);
         else
             SetNotBusy();
+    }
+
+    // Released: a rack that is still full now ends the level.
+    public void HoldGameOver(bool hold)
+    {
+        gameOverHeld = hold;
+
+        if (!hold && !isBusy && GetFreeSpot() == null && GameManager.instance.IsGame())
+            GameManager.instance.SetGameState(EGameState.GAMEOVER);
     }
 
     private ItemSpot GetFreeSpot()
@@ -702,6 +713,28 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
         MoveAllItemsToLeft(SetNotBusy);
 
         return true;
+    }
+
+    // The items stay in their spots but no longer match with new ones.
+    public void ExcludeFromMatching(List<Item> items)
+    {
+        for (int i = 0; i < items.Count; i++)
+            RemoveItemFromMergeData(items[i]);
+    }
+
+    public void IncludeInMatching(List<Item> items)
+    {
+        for (int i = 0; i < items.Count; i++)
+        {
+            Item item = items[i];
+            if (item == null || item.Spot == null)
+                continue;
+
+            if (!itemMergeDataDictionary.ContainsKey(item.ItemName))
+                CreateItemMergeData(item);
+            else if (!itemMergeDataDictionary[item.ItemName].items.Contains(item))
+                itemMergeDataDictionary[item.ItemName].Add(item);
+        }
     }
 
     // The rack is always compacted to the left, so this is the rightmost item.

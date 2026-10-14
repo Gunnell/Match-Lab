@@ -228,14 +228,11 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         if (plan == null)
             return;
 
-        // Locked from the tap until the flight starts, so the planned items
-        // can't be tapped away during the animation.
         vacuumPUCount--;
         SaveData();
         vacuumChargeSpent = true;
         isVacuumBusy = true;
-        InputManager.Lock();
-        vacuumPlan = plan;
+        StartVacuumUse(plan);
         vacuum.Play();
         PlayVacuumSuction();
         StartCoroutine(VacuumSequence(vacuumFlightDelay));
@@ -260,14 +257,63 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         // Editor test button: run a full use without the animation.
         if (isVacuumBusy) return;
 
-        vacuumPlan = BuildVacuumPlan();
-        if (vacuumPlan == null) return;
+        VacuumPlan plan = BuildVacuumPlan();
+        if (plan == null) return;
 
         vacuumChargeSpent = false;
         isVacuumBusy = true;
-        InputManager.Lock();
+        StartVacuumUse(plan);
         PlayVacuumSuction();
         StartCoroutine(VacuumSequence(vacuumFlightDelay));
+    }
+
+    // Input stays open: the planned items are taken out right away instead,
+    // and the rack can't end the level until the vacuum is done.
+    private void StartVacuumUse(VacuumPlan plan)
+    {
+        vacuumPlan = plan;
+        ReserveVacuumPlan(plan);
+        ItemSpotsManager.instance.HoldGameOver(true);
+    }
+
+    // Board items freeze and can't be tapped; rack items stop matching.
+    private void ReserveVacuumPlan(VacuumPlan plan)
+    {
+        for (int i = 0; i < plan.fromBoard.Count; i++)
+            plan.fromBoard[i].DisablePhysics();
+
+        ItemSpotsManager.instance.ExcludeFromMatching(plan.fromRack);
+    }
+
+    private void UnreserveVacuumPlan(VacuumPlan plan)
+    {
+        if (plan == null)
+            return;
+
+        for (int i = 0; i < plan.fromBoard.Count; i++)
+        {
+            Item item = plan.fromBoard[i];
+            if (item != null && item.Spot == null)
+                item.EnablePhysics();
+        }
+
+        ItemSpotsManager.instance.IncludeInMatching(plan.fromRack);
+    }
+
+    private void ReplanVacuum()
+    {
+        UnreserveVacuumPlan(vacuumPlan);
+        vacuumPlan = BuildVacuumPlan();
+        if (vacuumPlan != null)
+            ReserveVacuumPlan(vacuumPlan);
+    }
+
+    // Rack items of a running use that haven't left the rack yet.
+    private bool VacuumHoldsRackItems => vacuumPlan != null && vacuumPlan.fromRack.Count > 0;
+
+    private void EndVacuumGameOverHold()
+    {
+        ItemSpotsManager.instance.HoldGameOver(false);
     }
 
     private void PlayVacuumSuction()
@@ -299,10 +345,10 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
                 yield break;
             }
 
-            // Input was locked since the tap, but a merge or compaction can
-            // still have moved things. Re-plan if the stored items went stale.
+            // A merge, a Spring or the level ending can still have taken
+            // planned items. Re-plan if the stored ones went stale.
             if (!IsVacuumPlanValid(vacuumPlan))
-                vacuumPlan = BuildVacuumPlan();
+                ReplanVacuum();
 
             if (vacuumPlan == null)
             {
@@ -325,7 +371,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
 
                 replannedAfterTimeout = true;
                 waited = 0;
-                vacuumPlan = BuildVacuumPlan();
+                ReplanVacuum();
             }
 
             yield return null;
@@ -338,8 +384,10 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     // Couldn't fire: give the charge back and release the board.
     private void AbortVacuum()
     {
+        UnreserveVacuumPlan(vacuumPlan);
         vacuumPlan = null;
         vacuumUncounted.Clear();
+        EndVacuumGameOverHold();
 
         if (vacuumSuction != null)
             vacuumSuction.Stop();
@@ -353,7 +401,6 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
 
         vacuumChargeSpent = false;
         isVacuumBusy = false;
-        InputManager.Unlock();
     }
 
     private void StartVacuumFlight(VacuumPlan plan)
@@ -393,9 +440,6 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
             bool fromRack = i < plan.fromRack.Count;
             FlyToVacuum(itemsToCollect[i], fromRack, i * vacuumStagger, topOfPile);
         }
-
-        // Flying items are kinematic with colliders off, so taps can come back.
-        InputManager.Unlock();
     }
 
     // Always exactly 3 items of one open goal: every rack copy first, the rest
@@ -475,8 +519,9 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
             if (plan.fromRack[i] == null || !rackItems.Contains(plan.fromRack[i]))
                 return false;
 
+        // Reserved board items are frozen, so only check they're still on the board.
         for (int i = 0; i < plan.fromBoard.Count; i++)
-            if (!IsFreeBoardItem(plan.fromBoard[i]))
+            if (plan.fromBoard[i] == null || plan.fromBoard[i].Spot != null)
                 return false;
 
         return true;
@@ -588,6 +633,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
          if (vacuumCounter >= vacuumItemsToCollect)
          {
              isVacuumBusy = false;
+             EndVacuumGameOverHold();
              StartCoroutine(FinishVacuum());
          }
 
@@ -638,9 +684,9 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
             return;
         }
 
-        // The rack is mid-animation (item flying in, merge, compaction).
-        // Don't drop the tap: fire as soon as the rack is free.
-        if (ItemSpotsManager.instance.IsBusy)
+        // The rack is mid-animation (item flying in, merge, compaction), or
+        // the Vacuum still has items in it. Fire as soon as the rack is free.
+        if (ItemSpotsManager.instance.IsBusy || VacuumHoldsRackItems)
         {
             springQueued = true;
             return;
@@ -657,7 +703,7 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
             return;
         }
 
-        if (ItemSpotsManager.instance.IsBusy)
+        if (ItemSpotsManager.instance.IsBusy || VacuumHoldsRackItems)
             return;
 
         // The Fan owns the input lock; wait for it to finish.

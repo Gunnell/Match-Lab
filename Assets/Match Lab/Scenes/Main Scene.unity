@@ -12337,6 +12337,7 @@ MonoBehaviour:
   vacuum: {fileID: 601211589}
   vacuumEndPosition: {fileID: 987739056}
   vacuumFlightDelay: 0.25
+  vacuumFinishDelay: 0.2
   vacuumSuction: {fileID: 0}
   vacuumRackWaitTimeout: 2
   vacuumPreferRackGoal: 1
