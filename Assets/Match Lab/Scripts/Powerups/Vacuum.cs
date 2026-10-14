@@ -10,6 +10,7 @@ public class Vacuum : Powerup
     public static Action started;
     
 
+    // Called by the Activate clip. Not used by PowerUpManager anymore.
     private void TriggerPowerupStart()
     {
         started?.Invoke();

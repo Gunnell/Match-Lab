@@ -8,6 +8,10 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [Header(" Vacuum Elements")]
     [SerializeField] private Vacuum vacuum;
     [SerializeField] private Transform vacuumEndPosition;
+    [Tooltip("Delay between the tap and the items taking off.")]
+    [SerializeField] private float vacuumFlightDelay = .25f;
+    [Tooltip("Optional, created at vacuumEndPosition when empty.")]
+    [SerializeField] private VacuumSuctionEffect vacuumSuction;
     [Tooltip("How long to wait for a busy rack before re-planning, then giving up with a refund.")]
     [SerializeField] private float vacuumRackWaitTimeout = 2f;
     [Tooltip("On: prefer the right-most goal already in the rack, random otherwise. Off: always a random open goal.")]
@@ -141,9 +145,6 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     private bool springQueued;
     private int vacuumItemsToCollect;
     private int vacuumCounter;
-    // One charge starts exactly one collection, even if the Activate clip
-    // raises its start event more than once.
-    private bool vacuumPending;
     private VacuumPlan vacuumPlan;
     // Whether the running use paid a charge (the editor button doesn't), so an abort only refunds what was spent.
     private bool vacuumChargeSpent;
@@ -169,7 +170,6 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
 
     private void Awake()
     {
-        Vacuum.started += OnVacuumStarted;
         InputManager.powerupClicked += OnPowerupClicked;
         // Collision matrix changes are global and outlive the scene.
         SetItemCollisions(true);
@@ -178,7 +178,6 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
 
     private void OnDestroy()
     {
-        Vacuum.started -= OnVacuumStarted;
         InputManager.powerupClicked -= OnPowerupClicked;
         SetItemCollisions(true);
     }
@@ -238,17 +237,9 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         isVacuumBusy = true;
         InputManager.Lock();
         vacuumPlan = plan;
-        vacuumPending = true;
         vacuum.Play();
-    }
-
-    private void OnVacuumStarted()
-    {
-        if (!vacuumPending)
-            return;
-
-        vacuumPending = false;
-        StartCoroutine(VacuumSequence());
+        PlayVacuumSuction();
+        StartCoroutine(VacuumSequence(vacuumFlightDelay));
     }
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
@@ -276,11 +267,28 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         vacuumChargeSpent = false;
         isVacuumBusy = true;
         InputManager.Lock();
-        StartCoroutine(VacuumSequence());
+        PlayVacuumSuction();
+        StartCoroutine(VacuumSequence(vacuumFlightDelay));
     }
 
-    private System.Collections.IEnumerator VacuumSequence()
+    private void PlayVacuumSuction()
     {
+        if (vacuumEndPosition == null)
+            return;
+
+        if (vacuumSuction == null)
+            vacuumSuction = VacuumSuctionEffect.Create(vacuumEndPosition);
+        else
+            vacuumSuction.SetTarget(vacuumEndPosition);
+
+        vacuumSuction.Play();
+    }
+
+    private System.Collections.IEnumerator VacuumSequence(float delay)
+    {
+        if (delay > 0)
+            yield return new WaitForSeconds(delay);
+
         float waited = 0;
         bool replannedAfterTimeout = false;
 
@@ -333,6 +341,9 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     {
         vacuumPlan = null;
         vacuumUncounted.Clear();
+
+        if (vacuumSuction != null)
+            vacuumSuction.Stop();
 
         if (vacuumChargeSpent)
         {
