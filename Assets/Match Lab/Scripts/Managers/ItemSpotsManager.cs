@@ -116,7 +116,7 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
             return;
 
         // Rack full.
-        if (FreeSpotCount() - pendingTaps.Count <= 0)
+        if (FreeSpotCount <= 0)
         {
             HopInPlace(item);
             return;
@@ -783,13 +783,17 @@ public class ItemSpotsManager : MonoBehaviour, IGameStateListener
     // Slot position in the rack, 0 = left-most.
     private int IndexOf(ItemSpot spot) => Array.IndexOf(spots, spot);
 
-    private int FreeSpotCount()
+    // Empty slots not already promised to a waiting tap.
+    public int FreeSpotCount
     {
-        int free = 0;
-        for (int i = 0; i < spots.Length; i++)
-            if (spots[i].IsEmpty())
-                free++;
-        return free;
+        get
+        {
+            int free = 0;
+            for (int i = 0; i < spots.Length; i++)
+                if (spots[i].IsEmpty())
+                    free++;
+            return Mathf.Max(0, free - pendingTaps.Count);
+        }
     }
 
     private bool IsFreeSpotAvailable()

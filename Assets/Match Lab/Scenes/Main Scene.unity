@@ -12168,6 +12168,8 @@ MonoBehaviour:
   slideSecondsPerUnit: 0.055
   sameRowSlideMultiplier: 1.5
   slideHopHeight: 0.25
+  fullHopSideForce: 300
+  fullHopUpForce: {x: 250, y: 350}
   bounceStrengthPerUnit: 0.2
   warningColor: {r: 1, g: 0, b: 0.047, a: 1}
   warningHalfPeriod: 0.5
@@ -12371,6 +12373,14 @@ MonoBehaviour:
   springForwardMultiplier: 2.15
   springTorqueRange: {x: 40, y: 120}
   springTorqueScale: 1
+  springAimRandomSpot: 1
+  springTargetMargin: 1.2
+  springTargetLift: 0.4
+  springApexHeight: 1.5
+  springThrowGravity: 30
+  springSpinRange: {x: 2, y: 5}
+  springLandingDamping: 4
+  springLandingDampingTime: 0.5
   springForceScale: 1
   springExtraFall: 1500
   springFallMultiplier: 0
@@ -13084,6 +13094,63 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 103393f6fb42747deba18d4ab74fafc0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Fan
+--- !u!1 &2012088443
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2012088445}
+  - component: {fileID: 2012088444}
+  m_Layer: 0
+  m_Name: Hint Manager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2012088444
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2012088443}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bd12d1c7e796e4b53a9806e1d55c77f7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::HintManager
+  idleDelays:
+  - 5
+  - 6
+  - 7
+  cycleDelay: 4
+  showDuration: 0.85
+  stagger: 0.1
+  outlineMaterial: {fileID: 2100000, guid: 2e9e7e9ad9e3342e78853cb8287d0a7d, type: 2}
+  outlineColor: {r: 1, g: 0.92, b: 0.2, a: 1}
+  pulseScale: 1.1
+  pulseTime: 0.2
+  maxGroups: 5
+  bigItemFactor: 1.5
+--- !u!4 &2012088445
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2012088443}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2032196305
 GameObject:
   m_ObjectHideFlags: 0
@@ -18513,3 +18580,4 @@ SceneRoots:
   - {fileID: 1080173399}
   - {fileID: 1784759895}
   - {fileID: 61215274}
+  - {fileID: 2012088445}
