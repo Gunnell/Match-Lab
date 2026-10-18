@@ -13,6 +13,10 @@ public class FreezeOverlay : MonoBehaviour
     [SerializeField] private CanvasGroup timerFrost;
     [SerializeField] private ParticleSystem[] snowParticles;
 
+    [Tooltip("Half the view height the snow emitters were laid out for (their parent sits on the camera). "
+        + "The snow is scaled from this to the camera's real view, so it stays on the screen edges whatever the camera.")]
+    [SerializeField] private float snowDesignHalfHeight = 1.87f;
+
     [Header(" Settings ")]
     [SerializeField] private AnimationCurve fadeCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
     [SerializeField] private float fadeInDuration = 1.85f;
@@ -24,6 +28,9 @@ public class FreezeOverlay : MonoBehaviour
 
     private float ratio = 1;
     private float timerRatio = 1;
+
+    private Vector3[] snowDesignPositions;
+    private Vector3[] snowDesignShapeScales;
 
     public float Ratio
     {
@@ -39,12 +46,14 @@ public class FreezeOverlay : MonoBehaviour
     {
         DisableRaycasts(screenFrost);
         DisableRaycasts(timerFrost);
+        StoreSnowLayout();
         ResetOverlay();
     }
 
     public void FadeIn()
     {
         Fade(0, fadeInDuration);
+        FitSnowToCamera();
 
         for (int i = 0; i < snowParticles.Length; i++)
             if (snowParticles[i] != null)
@@ -91,6 +100,75 @@ public class FreezeOverlay : MonoBehaviour
 
         if (timerFrost != null)
             timerFrost.alpha = 1 - timerRatio;
+    }
+
+    private void StoreSnowLayout()
+    {
+        snowDesignPositions = new Vector3[snowParticles.Length];
+        snowDesignShapeScales = new Vector3[snowParticles.Length];
+
+        for (int i = 0; i < snowParticles.Length; i++)
+        {
+            if (snowParticles[i] == null)
+                continue;
+
+            snowDesignPositions[i] = snowParticles[i].transform.localPosition;
+            snowDesignShapeScales[i] = snowParticles[i].shape.scale;
+
+            // Flakes and their drift scale with the parent, see FitSnowToCamera.
+            var main = snowParticles[i].main;
+            main.scalingMode = ParticleSystemScalingMode.Hierarchy;
+        }
+    }
+
+    // The emitters sit on a parent under the camera. Scale that parent so the
+    // layout matches the camera's view, then pin each emitter to its screen
+    // edge: top (laid out above centre) or left/right (laid out beside it).
+    private void FitSnowToCamera()
+    {
+        Camera cam = Camera.main;
+        if (cam == null || snowParticles.Length == 0 || snowParticles[0] == null || snowDesignHalfHeight <= 0)
+            return;
+
+        Transform root = snowParticles[0].transform.parent;
+        if (root == null)
+            return;
+
+        float depth = Mathf.Abs(snowDesignPositions[0].z);
+        float halfHeight = cam.orthographic
+            ? cam.orthographicSize
+            : depth * Mathf.Tan(cam.fieldOfView * .5f * Mathf.Deg2Rad);
+
+        float k = halfHeight / snowDesignHalfHeight;
+        root.localScale = Vector3.one * k;
+
+        // In the parent's (scaled) space.
+        float halfH = snowDesignHalfHeight;
+        float halfW = halfH * cam.aspect;
+
+        for (int i = 0; i < snowParticles.Length; i++)
+        {
+            if (snowParticles[i] == null)
+                continue;
+
+            Vector3 p = snowDesignPositions[i];
+            Vector3 shapeScale = snowDesignShapeScales[i];
+
+            if (Mathf.Abs(p.y) > Mathf.Abs(p.x))
+            {
+                p.y = Mathf.Sign(p.y) * halfH;
+                shapeScale.x = halfW * 2f;
+            }
+            else
+            {
+                p.x = Mathf.Sign(p.x) * halfW;
+                shapeScale.y = halfH * 2f;
+            }
+
+            snowParticles[i].transform.localPosition = p;
+            var shape = snowParticles[i].shape;
+            shape.scale = shapeScale;
+        }
     }
 
     private void StopSnow()
