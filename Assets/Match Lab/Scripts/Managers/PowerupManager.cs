@@ -123,6 +123,11 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
     [SerializeField] private float fanForceScale = 1f;
     [Tooltip("Scales the throw torque.")]
     [SerializeField] private float fanTorqueScale = 1f;
+    [Tooltip("Extra downward acceleration once a thrown item starts falling, until it first hits something. "
+        + "0 = plain gravity (-12): lands ~2.3s after the throw. 18 (total 30) cuts the fall from ~1.15s to ~0.75s.")]
+    [SerializeField] private float fanFallGravity = 18f;
+    [Tooltip("Stops the extra fall after this long, even if the item never hit anything.")]
+    [SerializeField] private float fanFallMaxTime = 2.5f;
 
     [Header(" Freeze Gun Elements ")]
     [SerializeField] private FreezeGun freezeGun;
@@ -1123,6 +1128,9 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         for (int i = 0; i < boardItems.Count; i++)
             ThrowToAir(boardItems[i].GetComponent<Rigidbody>());
 
+        if (fanFallGravity > 0)
+            StartCoroutine(FanFastFall(boardItems));
+
         yield return new WaitForSeconds(windStop - throwTime);
         if (fan != null)
             fan.StopWind();
@@ -1147,6 +1155,64 @@ public class PowerUpManager : MonoBehaviour, IGameStateListener
         // physics step, i.e. a velocity change of force * fixedDeltaTime / mass.
         rb.AddForce(force * fanForceScale, ForceMode.Force);
         rb.AddTorque(torque * fanTorqueScale, ForceMode.Force);
+    }
+
+    // After the apex, pull each thrown item down harder until its first
+    // contact (its downward speed stops), so the shuffle settles sooner.
+    private System.Collections.IEnumerator FanFastFall(List<Item> items)
+    {
+        int count = items.Count;
+        Rigidbody[] bodies = new Rigidbody[count];
+        int[] throwIds = new int[count];
+        bool[] falling = new bool[count];
+        bool[] done = new bool[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            bodies[i] = items[i].GetComponent<Rigidbody>();
+            throwIds[i] = items[i].ThrowId;
+        }
+
+        float timer = 0;
+        int remaining = count;
+
+        while (remaining > 0 && timer < fanFallMaxTime)
+        {
+            yield return new WaitForFixedUpdate();
+            timer += Time.fixedDeltaTime;
+
+            for (int i = 0; i < count; i++)
+            {
+                if (done[i])
+                    continue;
+
+                // Picked, vacuumed or thrown by Spring meanwhile.
+                if (!IsFreeOnBoard(items[i], throwIds[i]))
+                {
+                    done[i] = true;
+                    remaining--;
+                    continue;
+                }
+
+                float vy = bodies[i].linearVelocity.y;
+
+                if (!falling[i])
+                {
+                    falling[i] = vy < 0;
+                    continue;
+                }
+
+                // Hit the pile, the floor or a wall from above.
+                if (vy > -.1f)
+                {
+                    done[i] = true;
+                    remaining--;
+                    continue;
+                }
+
+                bodies[i].AddForce(Vector3.down * fanFallGravity, ForceMode.Acceleration);
+            }
+        }
     }
 
     // Each axis 20-49 with a random sign.
